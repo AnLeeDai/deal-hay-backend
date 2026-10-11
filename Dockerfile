@@ -55,7 +55,9 @@ COPY php.production.ini "$PHP_INI_DIR/conf.d/zz-deal-hay.ini"
 COPY supervisord.conf /etc/supervisor/conf.d/deal-hay.conf
 COPY supervisord.worker.conf /etc/supervisor/conf.d/deal-hay-worker.conf
 
-RUN chmod 755 /app/docker-entrypoint.sh
+# Render uses an unprivileged HTTP port and may reject file capabilities.
+RUN setcap -r /usr/local/bin/frankenphp \
+    && chmod 755 /app/docker-entrypoint.sh
 
 ENV APP_ENV=production \
     APP_DEBUG=false \
@@ -67,6 +69,8 @@ ENV APP_ENV=production \
     QUEUE_NAMES=realtime,images,default
 
 USER app
+
+RUN frankenphp version
 
 EXPOSE 10000
 

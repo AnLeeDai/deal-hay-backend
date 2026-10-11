@@ -48,6 +48,8 @@ The API service runs `php artisan migrate --force` as Render's pre-deploy comman
 
 FrankenPHP/Caddy is the public listener on Render's `PORT` (default `10000`). Reverb listens on `127.0.0.1:8081`, and Caddy forwards `/app/*` and `/apps/*` to it. Keep `REVERB_SERVER_HOST=127.0.0.1` in production. If `/up` returns `{"health":"OK"}` while `/api` returns plain-text `Not found.`, traffic is reaching Reverb directly; redeploy with only the Caddy port exposed. Local Compose overrides the Reverb host to `0.0.0.0` for its direct `8081` mapping.
 
+The image removes FrankenPHP's inherited `CAP_NET_BIND_SERVICE` before switching to the `app` user, following [FrankenPHP's guidance for running without capabilities](https://frankenphp.dev/docs/docker/#running-with-no-capabilities). Port `10000` does not need that capability. Restricted runtimes can otherwise reject execution with `couldn't exec frankenphp: EPERM`, leaving no public HTTP listener. The build also runs `frankenphp version` as `app` to verify the executable.
+
 Create a Render Blueprint from this repository and fill every blank value in the `deal-hay-production` environment group before the first successful deploy. In particular:
 
 - Generate `APP_KEY` once with `php artisan key:generate --show`; never regenerate it during startup.
@@ -63,13 +65,13 @@ The configured pre-deploy command and background worker require paid Render comp
 
 ## Vercel frontend
 
-Configure one server-only variable for each Vercel environment and redeploy after changing it:
+Configure the current frontend's API variable for each Vercel environment and redeploy after changing it:
 
 ```env
-BACKEND_API_URL=https://your-api-host.onrender.com/api
+NEXT_PUBLIC_API=https://your-api-host.onrender.com/api
 ```
 
-No backend credential and no `NEXT_PUBLIC_*` backend URL is required by the current frontend.
+The frontend reads this URL from a `server-only` module. Next.js replaces `NEXT_PUBLIC_API` at build time, so changing it requires a new deployment. No backend credential belongs in this value.
 
 ## Useful commands
 

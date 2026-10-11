@@ -46,6 +46,8 @@ The Blueprint assumes `deal-hay-backend` is the Git repository root. If it is la
 
 The API service runs `php artisan migrate --force` as Render's pre-deploy command. The runtime entrypoint then runs `php artisan optimize`, after production environment variables are available. No persistent disk is required because the database, cache/session data, queues, and R2 media are external.
 
+FrankenPHP/Caddy is the public listener on Render's `PORT` (default `10000`). Reverb listens on `127.0.0.1:8081`, and Caddy forwards `/app/*` and `/apps/*` to it. Keep `REVERB_SERVER_HOST=127.0.0.1` in production. If `/up` returns `{"health":"OK"}` while `/api` returns plain-text `Not found.`, traffic is reaching Reverb directly; redeploy with only the Caddy port exposed. Local Compose overrides the Reverb host to `0.0.0.0` for its direct `8081` mapping.
+
 Create a Render Blueprint from this repository and fill every blank value in the `deal-hay-production` environment group before the first successful deploy. In particular:
 
 - Generate `APP_KEY` once with `php artisan key:generate --show`; never regenerate it during startup.

@@ -63,11 +63,12 @@ ENV APP_ENV=production \
     LOG_CHANNEL=stderr \
     LOG_LEVEL=info \
     PORT=10000 \
+    REVERB_SERVER_HOST=127.0.0.1 \
     QUEUE_NAMES=realtime,images,default
 
 USER app
 
-EXPOSE 10000 8081
+EXPOSE 10000
 
 HEALTHCHECK NONE
 

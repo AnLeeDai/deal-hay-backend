@@ -76,6 +76,8 @@ class ImageService
 
     public function convertToWebp(UploadedFile $file, int $quality = 75): string
     {
+        $this->assertSafeSourceSize((int) $file->getSize());
+
         if (! in_array($file->getMimeType(), self::SUPPORTED_MIME_TYPES, strict: true)) {
             throw new ImageDecoderException(
                 "Không hỗ trợ định dạng hình ảnh [{$file->getMimeType()}]. Định dạng hỗ trợ: "
@@ -102,6 +104,8 @@ class ImageService
 
     public function normalizeWebpBinary(string $content, int $quality = 75): string
     {
+        $this->assertSafeSourceSize(strlen($content));
+
         $imageInfo = @getimagesizefromstring($content);
 
         if (! is_array($imageInfo) || ($imageInfo['mime'] ?? null) !== ImageUploadTypeEnum::WEBP) {
@@ -113,6 +117,8 @@ class ImageService
 
     public function normalizeBinary(string $content, int $quality = 75): string
     {
+        $this->assertSafeSourceSize(strlen($content));
+
         $imageInfo = @getimagesizefromstring($content);
 
         if (! is_array($imageInfo) || ! in_array($imageInfo['mime'] ?? null, self::SUPPORTED_MIME_TYPES, true)) {
@@ -302,7 +308,18 @@ class ImageService
     public function deleteMany(iterable $paths): void
     {
         foreach ($paths as $path) {
-            $this->delete($path);
+            if (! filled($path)) {
+                continue;
+            }
+
+            $storagePath = $this->storagePath($path);
+            if ($storagePath === null || Str::startsWith($storagePath, 'systems_avatar/')) {
+                continue;
+            }
+
+            if (! $this->delete($path)) {
+                throw new RuntimeException('Không thể xóa ảnh từ kho lưu trữ.');
+            }
         }
     }
 
@@ -346,6 +363,13 @@ class ImageService
         return Str::startsWith($path, $prefix)
             ? ltrim(Str::after($path, $prefix), '/')
             : null;
+    }
+
+    private function assertSafeSourceSize(int $size): void
+    {
+        if ($size < 1 || $size > self::MAX_SOURCE_BYTES) {
+            throw new ImageDecoderException('Ảnh tải lên phải có kích thước từ 1 byte đến 30 MB.');
+        }
     }
 
     private function assertSafeDimensions(int $width, int $height): void

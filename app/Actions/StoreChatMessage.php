@@ -47,7 +47,7 @@ class StoreChatMessage
             return ['message' => $existingMessage, 'replayed' => true];
         }
 
-        $storedAttachment = $this->attachments->store($attachment, $conversation);
+        $storedAttachment = $this->attachments->store($attachment, (string) $conversation->getKey());
 
         abort_if(
             $attachment !== null && $storedAttachment['path'] === false,

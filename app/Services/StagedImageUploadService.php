@@ -204,12 +204,13 @@ class StagedImageUploadService
 
         if ($expectedSize < 1 || $expectedSize > self::MAX_IMAGE_BYTES) {
             if ($file === null) {
-                $this->images->delete($path);
+                $this->discardSource($path);
             }
             $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 30 MB.');
         }
 
         $destination = (string) $upload->destination_path;
+        $content = $file === null ? $this->readSource($path, $expectedSize) : null;
 
         try {
             if ($file !== null) {
@@ -219,20 +220,8 @@ class StagedImageUploadService
 
                 $normalizedContent = $this->images->convertToWebp($file);
             } else {
-                $stream = $this->images->readStream($path);
-
-                try {
-                    $content = stream_get_contents($stream, $expectedSize + 1);
-                } finally {
-                    fclose($stream);
-                }
-
-                if (! is_string($content)) {
-                    $this->invalidUpload('Không thể đọc đầy đủ nội dung ảnh tải lên.');
-                }
-
                 if (strlen($content) !== $expectedSize) {
-                    $this->images->delete($path);
+                    $this->discardSource($path);
                     $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 30 MB.');
                 }
 
@@ -244,14 +233,14 @@ class StagedImageUploadService
         } catch (Throwable $exception) {
             report($exception);
             if ($file === null) {
-                $this->images->delete($path);
+                $this->discardSource($path);
             }
             $this->invalidUpload('Nội dung ảnh tải lên không hợp lệ hoặc vượt quá giới hạn an toàn.');
         }
 
         if (strlen($normalizedContent) > self::MAX_NORMALIZED_IMAGE_BYTES) {
             if ($file === null) {
-                $this->images->delete($path);
+                $this->discardSource($path);
             }
             $this->invalidUpload('Ảnh sau khi chuẩn hóa vượt quá giới hạn 3 MB.');
         }
@@ -281,6 +270,44 @@ class StagedImageUploadService
         }
 
         return $destination;
+    }
+
+    private function readSource(string $path, int $expectedSize): string
+    {
+        try {
+            $stream = $this->images->readStream($path);
+
+            try {
+                $content = stream_get_contents($stream, $expectedSize + 1);
+            } finally {
+                fclose($stream);
+            }
+
+            if (! is_string($content)) {
+                throw new RuntimeException('Không thể đọc đầy đủ nội dung ảnh tải lên.');
+            }
+
+            return $content;
+        } catch (Throwable $exception) {
+            report($exception);
+
+            throw new ServiceUnavailableHttpException(
+                2,
+                'Kho lưu trữ ảnh đang bận. Vui lòng thử lại sau ít giây.',
+                $exception,
+            );
+        }
+    }
+
+    private function discardSource(string $path): void
+    {
+        try {
+            if (! $this->images->delete($path)) {
+                throw new RuntimeException('Không thể xóa ảnh tải lên không hợp lệ.');
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 
     /** @param iterable<array-key, mixed> $tokens */

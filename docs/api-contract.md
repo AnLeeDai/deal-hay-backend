@@ -94,11 +94,13 @@ All successful JSON responses use UTF-8 JSON. Validation failures return `422 { 
 
 | Method | Path | Auth | Request body | Response shape |
 |---|---|---|---|---|
-| POST | `/private/media/transform` | Bearer | `size`, `purpose` (`avatar`, `productPrimary`, `productGallery`, `review`, `chat`) | `{ url, token }` for direct browser transform upload |
-| POST | `/private/uploads/images/presign` | Bearer | `uploads: [{ size, content_type }]` | `{ uploads: [{ token, url?, headers? }] }` |
-| POST | `/private/uploads/images` | Bearer | `uploads: [{ size, content_type }]` | `{ uploads: [{ token }] }` |
+| POST | `/private/media/transform` | Bearer | `size` (1 byte to 30 MiB, in bytes), `purpose` (`avatar`, `product`, `review`, `chat`) | `{ url, token }` for direct browser transform upload |
+| POST | `/private/uploads/images/presign` | Bearer | Up to 51 `uploads: [{ size, content_type }]`; each image is 1 byte to 30 MiB | `{ uploads: [{ token, url?, headers? }] }` |
+| POST | `/private/uploads/images` | Bearer | Up to 51 `uploads: [{ size, content_type }]`; each image is 1 byte to 30 MiB | `{ uploads: [{ token }] }` |
 | POST | `/private/uploads/images/prepare` | Bearer | multipart `token`, `image` | `204` |
 | DELETE | `/private/uploads/images/staged` | Bearer | `tokens[]` | `204` |
+
+The frontend first obtains a transform grant using its authenticated Server Action, then sends the original image directly to `/media/browser/transform` with the short-lived grant as its bearer token. The existing transform returns WebP up to 20 KiB; only that result goes through the final Server Action. This keeps original images up to 30 MiB out of Vercel Function request bodies. `IMAGE_BROWSER_URL` (or its default, `APP_URL`) must be reachable from the browser, and backend CORS must allow the frontend origin and the `Authorization` header.
 
 ## Admin
 

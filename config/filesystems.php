@@ -37,7 +37,7 @@ return [
 
         'r2' => [
             'driver' => env('R2_DRIVER', 'local'),
-            'root' => storage_path('app/r2'),
+            'root' => env('R2_DRIVER', 'local') === 'local' ? storage_path('app/r2') : '',
             'url' => env('R2_URL', rtrim(env('APP_URL', 'http://localhost'), '/').'/storage/r2'),
             'visibility' => 'public',
             'key' => env('R2_ACCESS_KEY_ID'),
@@ -58,7 +58,7 @@ return [
 
         'r2_private' => [
             'driver' => env('R2_PRIVATE_DRIVER', env('R2_DRIVER', 'local')),
-            'root' => storage_path('app/r2-private'),
+            'root' => env('R2_PRIVATE_DRIVER', env('R2_DRIVER', 'local')) === 'local' ? storage_path('app/r2-private') : '',
             'key' => env('R2_ACCESS_KEY_ID'),
             'secret' => env('R2_SECRET_ACCESS_KEY'),
             'region' => env('R2_REGION', 'auto'),

@@ -3,12 +3,14 @@
 namespace App\Services;
 
 use App\Enums\ImagePurposeEnum;
+use App\Jobs\DeleteChatAttachment;
 use App\Models\ChatMessage;
 use Closure;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\HeaderUtils;
 use Throwable;
 
@@ -83,7 +85,7 @@ class ChatAttachmentService
     public function deleteStoredAttachment(string $path, string $disk): void
     {
         if (! Storage::disk($disk)->delete($path)) {
-            throw new \RuntimeException('Cannot delete attachment.');
+            throw new RuntimeException('Cannot delete attachment.');
         }
     }
 
@@ -95,12 +97,17 @@ class ChatAttachmentService
 
         try {
             if ($isImage) {
-                $this->images->delete($path, $disk);
+                if (! $this->images->delete($path, $disk)) {
+                    throw new RuntimeException('Cannot delete attachment.');
+                }
             } else {
-                Storage::disk($disk)->delete($path);
+                $this->deleteStoredAttachment($path, $disk);
             }
         } catch (Throwable $exception) {
             report($exception);
+            DeleteChatAttachment::dispatch($path, $disk)
+                ->onConnection('database_outbox')
+                ->afterCommit();
         }
     }
 

@@ -6,6 +6,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\FilesystemManager;
+use RuntimeException;
 use Throwable;
 
 #[Signature('app:prune-staged-images {--older-than=60 : Minimum age in minutes} {--limit=1000 : Maximum files to remove} {--dry-run : Only report matching files}')]
@@ -51,7 +52,9 @@ class PruneStagedImages extends Command
 
                 if (! $this->option('dry-run')) {
                     try {
-                        $disk->delete($attributes->path());
+                        if (! $disk->delete($attributes->path())) {
+                            throw new RuntimeException('Unable to delete the staged image.');
+                        }
                         $deleted++;
                     } catch (Throwable $exception) {
                         report($exception);

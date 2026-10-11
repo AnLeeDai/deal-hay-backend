@@ -1,0 +1,83 @@
+services:
+  - type: web
+    name: deal-hay-api
+    runtime: docker
+    plan: 0.5c-512mb
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: commit
+    healthCheckPath: /up
+    preDeployCommand: php artisan migrate --force
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - fromGroup: deal-hay-production
+      - key: DEPLOY_ROLE
+        value: web
+
+  - type: worker
+    name: deal-hay-worker
+    runtime: docker
+    plan: 0.5c-512mb
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - fromGroup: deal-hay-production
+      - key: DEPLOY_ROLE
+        value: worker
+
+envVarGroups:
+  - name: deal-hay-production
+    envVars:
+      - key: APP_NAME
+        value: Deal Hay Backend
+      - key: APP_ENV
+        value: production
+      - key: APP_KEY
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_URL
+      - key: FRONTEND_URL
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: LOG_LEVEL
+        value: info
+      - key: DB_CONNECTION
+        value: mysql
+      - key: DB_URL
+      - key: BROADCAST_CONNECTION
+        value: reverb
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: SESSION_DRIVER
+        value: database
+      - key: MAIL_MAILER
+        value: resend
+      - key: MAIL_FROM_ADDRESS
+      - key: RESEND_API_KEY
+      - key: ADMIN_FULL_NAME
+      - key: ADMIN_EMAIL
+      - key: ADMIN_PHONE_NUMBER
+      - key: ADMIN_ADDRESS_DETAIL
+      - key: ADMIN_WARD
+      - key: ADMIN_PROVINCE
+      - key: ADMIN_PASSWORD
+      - key: R2_DRIVER
+        value: s3
+      - key: R2_ACCESS_KEY_ID
+      - key: R2_SECRET_ACCESS_KEY
+      - key: R2_BUCKET
+      - key: R2_PRIVATE_BUCKET
+      - key: R2_ENDPOINT
+      - key: R2_URL
+      - key: REVERB_APP_ID
+        generateValue: true
+      - key: REVERB_APP_KEY
+        generateValue: true
+      - key: REVERB_APP_SECRET
+        generateValue: true

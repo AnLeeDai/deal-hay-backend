@@ -1,0 +1,56 @@
+x-app-environment: &app-environment
+  APP_NAME: Deal Hay Docker
+  APP_ENV: local
+  APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  APP_DEBUG: "true"
+  APP_URL: http://localhost:8000
+  FRONTEND_URL: http://localhost:3000
+  DB_CONNECTION: sqlite
+  DB_DATABASE: /app/storage/database.sqlite
+  BROADCAST_CONNECTION: reverb
+  MAIL_MAILER: log
+  MAIL_FROM_ADDRESS: no-reply@example.com
+  ADMIN_USER_CODE: AD-00001
+  ADMIN_FULL_NAME: Docker Admin
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PHONE_NUMBER: "0900000000"
+  ADMIN_ADDRESS_DETAIL: 1 Example Street
+  ADMIN_WARD: Ward 1
+  ADMIN_PROVINCE: Ho Chi Minh City
+  ADMIN_PASSWORD: ChangeMe123!
+  R2_DRIVER: local
+  REVERB_APP_ID: local
+  REVERB_APP_KEY: local
+  REVERB_APP_SECRET: local
+  REVERB_PORT: "8081"
+  REVERB_SCHEME: http
+
+services:
+  web:
+    image: deal-hay-backend:local
+    build:
+      context: .
+    environment:
+      <<: *app-environment
+      DEPLOY_ROLE: web
+      PORT: "10000"
+    ports:
+      - "8000:10000"
+      - "8081:8081"
+    volumes:
+      - deal-hay-storage:/app/storage
+    restart: unless-stopped
+
+  worker:
+    image: deal-hay-backend:local
+    build:
+      context: .
+    environment:
+      <<: *app-environment
+      DEPLOY_ROLE: worker
+    volumes:
+      - deal-hay-storage:/app/storage
+    restart: unless-stopped
+
+volumes:
+  deal-hay-storage:

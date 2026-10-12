@@ -18,7 +18,7 @@ it('starts PHP with limits accepting 51 image parts and a 32 MiB product payload
     $process = new Process([
         ...array_slice($serverCommand, 0, array_search('-S', $serverCommand, true)),
         '-r',
-        'echo json_encode(["files" => (int) ini_get("max_file_uploads"), "post_bytes" => ini_parse_quantity(ini_get("post_max_size")), "source_bytes" => ini_parse_quantity(ini_get("upload_max_filesize"))], JSON_THROW_ON_ERROR);',
+        'echo json_encode(["files" => (int) ini_get("max_file_uploads"), "post_bytes" => ini_parse_quantity(ini_get("post_max_size")), "source_bytes" => ini_parse_quantity(ini_get("upload_max_filesize")), "memory_bytes" => ini_parse_quantity(ini_get("memory_limit"))], JSON_THROW_ON_ERROR);',
     ]);
 
     $process->mustRun();
@@ -27,5 +27,6 @@ it('starts PHP with limits accepting 51 image parts and a 32 MiB product payload
         'files' => 51,
         'post_bytes' => 41_943_040,
         'source_bytes' => 31_457_280,
+        'memory_bytes' => 268_435_456,
     ]);
 });

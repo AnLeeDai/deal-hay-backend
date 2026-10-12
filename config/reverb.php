@@ -4,7 +4,11 @@ $frontendHost = parse_url((string) env('FRONTEND_URL', 'http://localhost:3000'),
 $applicationHost = parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST);
 
 $allowedOrigins = array_values(array_filter(array_map(
-    'trim',
+    static function (string $origin): string {
+        $origin = trim($origin);
+
+        return parse_url($origin, PHP_URL_HOST) ?: $origin;
+    },
     explode(',', (string) env('REVERB_ALLOWED_ORIGINS', $frontendHost ?: '*')),
 )));
 

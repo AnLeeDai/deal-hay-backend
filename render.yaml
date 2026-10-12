@@ -41,6 +41,9 @@ envVarGroups:
         value: "false"
       - key: APP_URL
       - key: FRONTEND_URL
+        value: https://deal-hay.vercel.app
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://deal-hay.vercel.app,https://deal-hay-fontend.vercel.app
       - key: LOG_CHANNEL
         value: stderr
       - key: LOG_LEVEL
@@ -81,3 +84,19 @@ envVarGroups:
         generateValue: true
       - key: REVERB_APP_SECRET
         generateValue: true
+      - key: REVERB_ALLOWED_ORIGINS
+        value: deal-hay.vercel.app
+      - key: REVERB_HOST
+        value: deal-hay-backend.onrender.com
+      - key: REVERB_PORT
+        value: "443"
+      - key: REVERB_SCHEME
+        value: https
+      - key: REVERB_PUBLIC_HOST
+        value: deal-hay-backend.onrender.com
+      - key: REVERB_PUBLIC_PORT
+        value: "443"
+      - key: REVERB_PUBLIC_SCHEME
+        value: https
+      - key: REVERB_SERVER_PORT
+        value: "8081"

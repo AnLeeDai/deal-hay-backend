@@ -3,10 +3,11 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class RealtimeConfigController extends Controller
 {
-    public function __invoke(): JsonResponse
+    public function __invoke(Request $request): JsonResponse
     {
         /** @var array<string, mixed> $application */
         $application = config('reverb.apps.apps.0', []);
@@ -16,9 +17,16 @@ class RealtimeConfigController extends Controller
         $public = config('reverb.public', []);
 
         $key = $application['key'] ?? null;
-        $scheme = $public['scheme'] ?: ($options['scheme'] ?? 'https');
-        $host = $public['host'] ?: ($options['host'] ?? parse_url((string) config('app.url'), PHP_URL_HOST));
-        $port = $public['port'] ?: ($options['port'] ?? ($scheme === 'https' ? 443 : 80));
+        $publicScheme = $public['scheme'] ?? null;
+        $secureRequest = $request->isSecure();
+        $scheme = $publicScheme ?: ($secureRequest ? 'https' : ($options['scheme'] ?? 'http'));
+        $host = ($public['host'] ?? null) ?: ($secureRequest
+            ? $request->getHost()
+            : ($options['host'] ?? parse_url((string) config('app.url'), PHP_URL_HOST)));
+        $defaultPort = $scheme === 'https' ? 443 : 80;
+        $port = ($public['port'] ?? null) ?: ($publicScheme || $secureRequest
+            ? $defaultPort
+            : ($options['port'] ?? $defaultPort));
 
         abort_unless(filled($key) && filled($host), 503, 'Realtime chưa được cấu hình.');
 

@@ -40,6 +40,80 @@ it('rejects realtime configuration requests without authentication', function ()
     $this->getJson('/api/realtime/config')->assertUnauthorized();
 });
 
+it('advertises the HTTPS request endpoint when publisher options still use HTTP port 8081', function (): void {
+    $publisherOptions = ['host' => '127.0.0.1', 'port' => 8081, 'scheme' => 'http'];
+    config()->set('reverb.apps.apps.0.key', 'public-test-key');
+    config()->set('reverb.apps.apps.0.options', $publisherOptions);
+    config()->set('broadcasting.connections.reverb.options', $publisherOptions);
+    config()->set('reverb.public', []);
+    Sanctum::actingAs(User::factory()->customer()->create());
+
+    $this->getJson('https://api.example.test/api/realtime/config')
+        ->assertOk()
+        ->assertJsonPath('host', 'api.example.test')
+        ->assertJsonPath('port', 443)
+        ->assertJsonPath('scheme', 'https');
+
+    expect(config('reverb.apps.apps.0.options'))->toBe($publisherOptions);
+    expect(config('broadcasting.connections.reverb.options'))->toBe($publisherOptions);
+});
+
+it('uses trusted proxy HTTPS headers to advertise the public Reverb endpoint', function (): void {
+    config()->set('reverb.apps.apps.0.key', 'public-test-key');
+    config()->set('reverb.apps.apps.0.options', ['host' => '127.0.0.1', 'port' => 8081, 'scheme' => 'http']);
+    config()->set('reverb.public', []);
+    Sanctum::actingAs(User::factory()->customer()->create());
+
+    $this->withHeaders([
+        'X-Forwarded-Proto' => 'https',
+        'X-Forwarded-Host' => 'api.example.test',
+        'X-Forwarded-Port' => '443',
+    ])->getJson('http://internal.example.test:10000/api/realtime/config')
+        ->assertOk()
+        ->assertJsonPath('host', 'api.example.test')
+        ->assertJsonPath('port', 443)
+        ->assertJsonPath('scheme', 'https');
+});
+
+it('preserves explicit separate public Reverb endpoints for HTTPS clients', function (): void {
+    config()->set('reverb.apps.apps.0.key', 'public-test-key');
+    config()->set('reverb.apps.apps.0.options', ['host' => '127.0.0.1', 'port' => 8081, 'scheme' => 'http']);
+    config()->set('reverb.public', ['host' => 'realtime.example.test', 'port' => 8443, 'scheme' => 'https']);
+    Sanctum::actingAs(User::factory()->customer()->create());
+
+    $this->getJson('https://api.example.test/api/realtime/config')
+        ->assertOk()
+        ->assertJsonPath('host', 'realtime.example.test')
+        ->assertJsonPath('port', 8443)
+        ->assertJsonPath('scheme', 'https');
+});
+
+it('defaults a partial public HTTPS override to port 443 instead of publisher port 8081', function (): void {
+    config()->set('reverb.apps.apps.0.key', 'public-test-key');
+    config()->set('reverb.apps.apps.0.options', ['host' => 'localhost', 'port' => 8081, 'scheme' => 'http']);
+    config()->set('reverb.public', ['host' => 'realtime.example.test', 'scheme' => 'https']);
+    Sanctum::actingAs(User::factory()->customer()->create());
+
+    $this->getJson('/api/realtime/config')
+        ->assertOk()
+        ->assertJsonPath('host', 'realtime.example.test')
+        ->assertJsonPath('port', 443)
+        ->assertJsonPath('scheme', 'https');
+});
+
+it('preserves the configured HTTP port 8081 for local Reverb clients', function (): void {
+    config()->set('reverb.apps.apps.0.key', 'public-test-key');
+    config()->set('reverb.apps.apps.0.options', ['host' => '127.0.0.1', 'port' => 8081, 'scheme' => 'http']);
+    config()->set('reverb.public', []);
+    Sanctum::actingAs(User::factory()->customer()->create());
+
+    $this->getJson('http://localhost:8000/api/realtime/config')
+        ->assertOk()
+        ->assertJsonPath('host', '127.0.0.1')
+        ->assertJsonPath('port', 8081)
+        ->assertJsonPath('scheme', 'http');
+});
+
 it('authorizes only conversation members for private and presence channels', function (): void {
     config()->set('broadcasting.default', 'reverb');
     config()->set('broadcasting.connections.reverb.key', 'public-test-key');

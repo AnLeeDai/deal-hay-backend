@@ -25,11 +25,12 @@ The local `.env.example` intentionally contains only values that differ from app
 
 ## Docker
 
-One Dockerfile builds an image with three runtime roles:
+One Dockerfile builds an image with four runtime roles:
 
 | Service | `DEPLOY_ROLE` | Local address | Processes |
 | --- | --- | --- | --- |
 | `web` | `web` | `http://localhost:8000` | FrankenPHP/Caddy and Laravel API |
+| Free Render API | `web-worker` | Render API URL | FrankenPHP/Caddy, database queues, and scheduler |
 | `reverb` | `reverb` | `http://localhost:8081` | Reverb HTTP/WebSocket server |
 | `worker` | `worker` | No HTTP port | Database queues and scheduler |
 
@@ -42,7 +43,120 @@ docker compose logs -f web reverb worker
 
 Compose uses a dedicated SQLite/storage volume and local mail/media drivers. Containers publish broadcasts to `http://reverb:10000`; browsers connect to `ws://localhost:8081`. All three containers use the same database, cache store, and cache prefix. Run migrations before starting the services for the first time.
 
-## Render production deployment
+## Render Free: API + worker cùng container, Reverb riêng
+
+Nếu đang dùng **Free**, giữ hai Docker **Web Service** hiện tại: `deal-hay-backend` và `deal-hay-reverb`. API chạy thêm queue và scheduler bằng `DEPLOY_ROLE=web-worker`. Render không có Background Worker miễn phí; pre-deploy command chỉ có trên compute trả phí. Xem [Render Free](https://render.com/docs/free) và [pre-deploy command](https://render.com/docs/deploys#pre-deploy-command).
+
+### 1. Sửa lỗi `Pusher ... auth_key ... null given`
+
+Lỗi này cho biết `REVERB_APP_KEY` đang thiếu trong container Reverb. `APP_KEY` là key mã hóa của Laravel, khác với `REVERB_APP_KEY`; điền `APP_KEY` thôi chưa đủ.
+
+Mở **Environment Groups → deal-hay-production**. Nếu chưa có nhóm này, chọn **New Environment Group**, đặt tên `deal-hay-production` và tạo nhóm với các biến hiện có của API, bao gồm `APP_KEY` và `DB_URL`. Điền đủ ba biến dưới đây và dùng **cùng giá trị trên cả hai service**:
+
+| Biến | Giá trị |
+| --- | --- |
+| `REVERB_APP_ID` | App ID đang dùng; nếu chưa có, đặt `deal-hay` |
+| `REVERB_APP_KEY` | App key đang dùng; nếu chưa có, tạo một chuỗi ngẫu nhiên |
+| `REVERB_APP_SECRET` | App secret đang dùng; nếu chưa có, tạo một chuỗi ngẫu nhiên khác |
+
+Nếu chưa có key và secret, chạy hai lần trong terminal máy cá nhân có PHP:
+
+```bash
+php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'
+```
+
+Lấy kết quả lần thứ nhất làm `REVERB_APP_KEY`, lần thứ hai làm `REVERB_APP_SECRET`. Chỉ lưu trên Render. Giữ nguyên `APP_KEY` và bộ Reverb credentials nếu chúng đã tồn tại trong deployment cũ.
+
+Vào từng service → **Environment → Linked Environment Groups → chọn deal-hay-production → Link**. Trong **Environment Variables** của từng service, xóa các bản `REVERB_APP_ID`, `REVERB_APP_KEY`, `REVERB_APP_SECRET` trống hoặc khác với nhóm. Biến riêng của service luôn được ưu tiên hơn biến trong nhóm. Xem [Environment groups](https://render.com/docs/configure-environment-variables#environment-groups).
+
+### 2. Cấu hình nhóm dùng chung cho hai service
+
+Giữ DB MySQL bên ngoài hiện tại và các biến `DB_URL`, `APP_KEY`, `R2_*`, `MAIL_*`, `RESEND_API_KEY`, `ADMIN_*` đang dùng. Thêm hoặc kiểm tra:
+
+```env
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://deal-hay-backend.onrender.com
+FRONTEND_URL=https://deal-hay.vercel.app
+DB_CONNECTION=mysql
+CACHE_STORE=database
+CACHE_PREFIX=deal-hay-cache
+QUEUE_CONNECTION=database
+QUEUE_NAMES=realtime,images,default
+SESSION_DRIVER=database
+BROADCAST_CONNECTION=reverb
+LOG_CHANNEL=stderr
+LOG_LEVEL=info
+CORS_ALLOWED_ORIGINS=https://deal-hay.vercel.app,https://deal-hay-fontend.vercel.app
+REVERB_ALLOWED_ORIGINS=deal-hay.vercel.app,deal-hay-fontend.vercel.app
+```
+
+Nếu database mới, điền `ADMIN_FULL_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE_NUMBER`, `ADMIN_PASSWORD` trước khi API khởi động chạy migrations. Nếu frontend dùng tên miền khác, cập nhật `FRONTEND_URL` và hai danh sách origins theo tên miền thật.
+
+### 3. Dùng URL công khai của Reverb
+
+Mở service `deal-hay-reverb`, sao chép hostname trong URL công khai Render cấp. Ví dụ URL `https://deal-hay-reverb.onrender.com` có hostname `deal-hay-reverb.onrender.com`. Thêm vào nhóm dùng chung:
+
+```env
+REVERB_HOST=deal-hay-reverb.onrender.com
+REVERB_PORT=443
+REVERB_SCHEME=https
+REVERB_PUBLIC_HOST=deal-hay-reverb.onrender.com
+REVERB_PUBLIC_PORT=443
+REVERB_PUBLIC_SCHEME=https
+```
+
+Thay hostname ví dụ bằng hostname thật. `REVERB_HOST` và `REVERB_PUBLIC_HOST` không chứa `https://`, dấu `/` hay cổng. API/queue publish qua HTTPS; trình duyệt kết nối WebSocket qua WSS. Free Web Service không nhận kết nối private network, nên dùng hostname công khai cho cả hai. Xem [Render private network](https://render.com/docs/private-network).
+
+Xóa các biến riêng cũ `REVERB_HOST`, `REVERB_PORT`, `REVERB_SCHEME`, `REVERB_PUBLIC_HOST`, `REVERB_PUBLIC_PORT`, `REVERB_PUBLIC_SCHEME` nếu chúng đang ghi đè cấu hình nhóm bằng hostname nội bộ hoặc cổng `10000`. Bỏ override `PORT`, `REVERB_SERVER_HOST`, `REVERB_SERVER_PORT`; Render cấp `PORT` và entrypoint cho Reverb nghe tại `0.0.0.0:$PORT`.
+
+### 4. Đẩy code mới rồi cấu hình hai service
+
+Commit và push các thay đổi deployment lên branch mà hai service đang dùng. Cả hai chọn compute **Free**, runtime **Docker**, cùng repository/branch.
+
+| Mục | `deal-hay-backend` | `deal-hay-reverb` |
+| --- | --- | --- |
+| Biến riêng `DEPLOY_ROLE` | `web-worker` | `reverb` |
+| Biến riêng `RUN_MIGRATIONS` | `true` | `false` |
+| Dockerfile Path | `./Dockerfile` | `./Dockerfile` |
+| Docker Build Context | `.` | `.` |
+| Docker Command | Để trống | Để trống |
+| Health Check Path | `/up` | `/up` |
+| Pre-deploy Command (nếu đang có) | Xóa lệnh cũ | Để trống |
+
+Nếu GitHub chứa cả frontend và backend, đặt **Root Directory = deal-hay-backend** cho hai service; nếu repo chỉ chứa backend thì để trống. Giữ `RUN_MIGRATIONS` ở biến riêng, không đặt chung trong environment group.
+
+API chạy `php artisan migrate --force --no-interaction` khi container khởi động rồi chạy HTTP, queue và scheduler. Lệnh migrate chỉ áp dụng những migrations chưa chạy. Reverb không chạy migrations. Cách này không cần Render Shell hay pre-deploy command trên gói Free.
+
+Chọn **Save, rebuild, and deploy** nếu vừa sửa code/Dockerfile, hoặc **Manual Deploy → Deploy latest commit**. Deploy API trước để migrations tạo đủ bảng database/cache, rồi deploy Reverb. Không cần tạo service `deal-hay-worker` riêng cho cấu hình Free.
+
+### 5. Kiểm tra deploy
+
+Mở URL công khai thực tế của hai service:
+
+| Endpoint | Kết quả |
+| --- | --- |
+| API `/up` | HTTP `200` khi API, database và cache hoạt động |
+| Reverb `/up` | `{"health":"OK"}` |
+| API `/ready` | HTTP `200`, `status: ok` và database/cache/outbox_worker/reverb đều `ok` khi tất cả sẵn sàng |
+
+Trong **Logs của API**, Supervisor phải khởi động cả HTTP server, queue và scheduler. Nếu `/ready` trả `503`, đọc tên check `failed`: `outbox_worker` cần kiểm tra queue trong API; `reverb` cần kiểm tra URL công khai, credentials và trạng thái Reverb. Sau khi Reverb vừa thức dậy từ chế độ ngủ, chờ service khởi động xong rồi tải lại `/ready`.
+
+Frontend Vercel giữ `NEXT_PUBLIC_API=https://deal-hay-backend.onrender.com/api`; API trả cấu hình WebSocket công khai cho trình duyệt.
+
+### Blueprint Free (tùy chọn)
+
+`render.free.yaml` mô tả đúng hai Web Service với `plan: free`, queue/scheduler chạy cùng API và publisher Reverb dùng HTTPS công khai. `render.yaml` bên dưới dành cho ba service **trả phí**; chọn **Blueprint Path = render.free.yaml** nếu deploy theo Blueprint Free.
+
+Tạo và điền nhóm `deal-hay-production` trước khi sync; file Free chỉ liên kết nhóm hiện có, không tạo lại hoặc sinh lại credentials. Khi áp dụng vào service cũ, bỏ pre-deploy command trong Dashboard trước. File dùng đúng tên `deal-hay-backend`/`deal-hay-reverb` để Render có thể áp dụng vào hai service hiện tại; sửa tên và mọi `fromService.name` nếu service thật có tên khác. Xem [Blueprint reference](https://render.com/docs/blueprint-spec).
+
+Blueprint giả định repo root là backend. Với monorepo, đặt `dockerfilePath: ./deal-hay-backend/Dockerfile` và `dockerContext: ./deal-hay-backend` trong cả hai service; chọn Blueprint Path là `deal-hay-backend/render.free.yaml`. `region: singapore` phải trùng region của service hiện có vì Render không cho đổi region sau khi tạo.
+
+### Giới hạn Free
+
+Render cho Web Service ngủ sau 15 phút không có lưu lượng HTTP hoặc tin nhắn WebSocket; khi API ngủ, queue và scheduler trong container cũng dừng. Job lưu trong database sẽ được xử lý tiếp khi API hoạt động lại, nhưng tác vụ theo lịch không chạy liên tục. Hai service dùng chung hạn mức **750 giờ chạy mỗi workspace/tháng**; chúng không thể cùng chạy 24/7 suốt tháng trong hạn mức này. Xem [Render Free](https://render.com/docs/free).
+
+## Render paid production deployment
 
 Render exposes one public HTTP port per Web Service, so the API and realtime server have separate services and URLs. Each can use Render's default `PORT=10000` because they run in separate containers. A Background Worker processes the queue without an HTTP port. See [Render port binding](https://render.com/docs/web-services#port-binding) and [Background Workers](https://render.com/docs/background-workers).
 
@@ -124,7 +238,7 @@ Create a Render Blueprint from this repository and fill every blank value in the
 
 Remove stale per-service Dashboard overrides for `CACHE_STORE`, `CACHE_PREFIX`, and `REVERB_*` that conflict with the shared group or Blueprint. Render preserves variables that a later Blueprint revision omits; this includes old `REVERB_HOST`, `REVERB_PORT`, and `REVERB_PUBLIC_HOST` values in an existing environment group.
 
-The configured pre-deploy command and background worker require paid Render compute. For a free web-service experiment, migrations must be run manually and realtime/background work will not be production-ready.
+The configured pre-deploy command and background worker require paid Render compute. For Free compute, use the two-service configuration and `render.free.yaml` described above.
 
 ## Vercel frontend
 

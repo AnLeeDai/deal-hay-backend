@@ -54,6 +54,7 @@ COPY Caddyfile /etc/frankenphp/Caddyfile
 COPY php.production.ini "$PHP_INI_DIR/conf.d/zz-deal-hay.ini"
 COPY supervisord.conf /etc/supervisor/conf.d/deal-hay.conf
 COPY supervisord.worker.conf /etc/supervisor/conf.d/deal-hay-worker.conf
+COPY supervisord.web-worker.conf /etc/supervisor/conf.d/deal-hay-web-worker.conf
 
 # Render uses an unprivileged HTTP port and may reject file capabilities.
 RUN setcap -r /usr/local/bin/frankenphp \

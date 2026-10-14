@@ -6,6 +6,7 @@
 .env.*
 node_modules
 vendor
+bootstrap/cache/*.php
 database/*.sqlite
 public/build
 storage/*.key

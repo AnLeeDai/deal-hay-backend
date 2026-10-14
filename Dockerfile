@@ -54,6 +54,7 @@ COPY Caddyfile /etc/frankenphp/Caddyfile
 COPY php.production.ini "$PHP_INI_DIR/conf.d/zz-deal-hay.ini"
 COPY supervisord.conf /etc/supervisor/conf.d/deal-hay.conf
 COPY supervisord.worker.conf /etc/supervisor/conf.d/deal-hay-worker.conf
+COPY supervisord.web-worker.conf /etc/supervisor/conf.d/deal-hay-web-worker.conf
 
 # Render uses an unprivileged HTTP port and may reject file capabilities.
 RUN setcap -r /usr/local/bin/frankenphp \
@@ -65,7 +66,7 @@ ENV APP_ENV=production \
     LOG_CHANNEL=stderr \
     LOG_LEVEL=info \
     PORT=10000 \
-    REVERB_SERVER_HOST=127.0.0.1 \
+    REVERB_SERVER_HOST=0.0.0.0 \
     QUEUE_NAMES=realtime,images,default
 
 USER app

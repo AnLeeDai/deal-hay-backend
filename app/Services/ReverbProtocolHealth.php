@@ -19,15 +19,14 @@ class ReverbProtocolHealth
 
         try {
             $key = base64_encode(random_bytes(16));
-            $appKey = (string) config('reverb.apps.apps.0.key');
-            $host = $this->host();
+            $appKey = (string) config('broadcasting.connections.reverb.key');
             $origin = rtrim((string) config('reverb.health_origin', 'http://localhost'), '/');
             $request = implode("\r\n", [
                 sprintf(
                     'GET /app/%s?protocol=7&client=dealhay-health&version=1.0&flash=false HTTP/1.1',
                     rawurlencode($appKey),
                 ),
-                sprintf('Host: %s:%d', $host, $this->port()),
+                sprintf('Host: %s:%d', $this->socketHost(), $this->port()),
                 'Origin: '.$origin,
                 'Upgrade: websocket',
                 'Connection: Upgrade',
@@ -54,11 +53,22 @@ class ReverbProtocolHealth
     /** @return resource */
     private function connect()
     {
+        $context = stream_context_create([
+            'ssl' => [
+                'peer_name' => $this->host(),
+                'verify_peer' => true,
+                'verify_peer_name' => true,
+                'SNI_enabled' => true,
+            ],
+        ]);
+
         $socket = @stream_socket_client(
-            sprintf('tcp://%s:%d', $this->host(), $this->port()),
+            sprintf('%s://%s:%d', $this->usesTls() ? 'tls' : 'tcp', $this->socketHost(), $this->port()),
             $errorCode,
             $errorMessage,
             1,
+            STREAM_CLIENT_CONNECT,
+            $context,
         );
 
         if ($socket === false) {
@@ -164,13 +174,23 @@ class ReverbProtocolHealth
 
     private function host(): string
     {
-        $host = (string) config('reverb.servers.reverb.host', '127.0.0.1');
+        return trim((string) config('broadcasting.connections.reverb.options.host', '127.0.0.1'), '[]');
+    }
 
-        return $host === '0.0.0.0' ? '127.0.0.1' : $host;
+    private function socketHost(): string
+    {
+        $host = $this->host();
+
+        return str_contains($host, ':') ? '['.$host.']' : $host;
     }
 
     private function port(): int
     {
-        return (int) config('reverb.servers.reverb.port', 8081);
+        return (int) config('broadcasting.connections.reverb.options.port', $this->usesTls() ? 443 : 80);
+    }
+
+    private function usesTls(): bool
+    {
+        return in_array(strtolower((string) config('broadcasting.connections.reverb.options.scheme', 'https')), ['https', 'wss'], true);
     }
 }

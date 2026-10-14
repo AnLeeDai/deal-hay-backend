@@ -7,9 +7,9 @@ use RuntimeException;
 
 class OutboxWorkerHealth
 {
-    private const int HEARTBEAT_TTL_SECONDS = 30;
+    private const int HEARTBEAT_TTL_SECONDS = 180;
 
-    private const int MAX_HEARTBEAT_AGE_SECONDS = 20;
+    private const int MAX_HEARTBEAT_AGE_SECONDS = 120;
 
     public function __construct(private readonly CacheManager $cache) {}
 

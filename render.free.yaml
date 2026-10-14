@@ -1,0 +1,117 @@
+# Populate the existing deal-hay-production environment group before syncing.
+# APP_KEY, DB_URL and the three REVERB_APP_* credentials must remain shared.
+# Free compute has no background worker, pre-deploy command, or inbound private network.
+services:
+  - type: web
+    name: deal-hay-backend
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: start
+    autoDeployTrigger: commit
+    healthCheckPath: /up
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - fromGroup: deal-hay-production
+      - key: DEPLOY_ROLE
+        value: web-worker
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_URL
+        fromService:
+          name: deal-hay-backend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: BROADCAST_CONNECTION
+        value: reverb
+      - key: CACHE_STORE
+        value: database
+      - key: CACHE_PREFIX
+        value: deal-hay-cache
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: QUEUE_NAMES
+        value: realtime,images,default
+      - key: SESSION_DRIVER
+        value: database
+      - key: REVERB_HOST
+        fromService:
+          name: deal-hay-reverb
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: REVERB_PORT
+        value: "443"
+      - key: REVERB_SCHEME
+        value: https
+      - key: REVERB_PUBLIC_HOST
+        fromService:
+          name: deal-hay-reverb
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: REVERB_PUBLIC_PORT
+        value: "443"
+      - key: REVERB_PUBLIC_SCHEME
+        value: https
+
+  - type: web
+    name: deal-hay-reverb
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: start
+    autoDeployTrigger: commit
+    healthCheckPath: /up
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - fromGroup: deal-hay-production
+      - key: DEPLOY_ROLE
+        value: reverb
+      - key: RUN_MIGRATIONS
+        value: "false"
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_URL
+        fromService:
+          name: deal-hay-backend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: BROADCAST_CONNECTION
+        value: reverb
+      - key: CACHE_STORE
+        value: database
+      - key: CACHE_PREFIX
+        value: deal-hay-cache
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: QUEUE_NAMES
+        value: realtime,images,default
+      - key: SESSION_DRIVER
+        value: database
+      - key: REVERB_HOST
+        fromService:
+          name: deal-hay-reverb
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: REVERB_PORT
+        value: "443"
+      - key: REVERB_SCHEME
+        value: https
+      - key: REVERB_PUBLIC_HOST
+        fromService:
+          name: deal-hay-reverb
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: REVERB_PUBLIC_PORT
+        value: "443"
+      - key: REVERB_PUBLIC_SCHEME
+        value: https

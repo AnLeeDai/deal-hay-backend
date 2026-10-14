@@ -245,6 +245,7 @@ class SaveShopProductDetails
             ->orderBy('id')
             ->lockForUpdate()
             ->get();
+        $existingOptionsByName = $existingOptions->keyBy('name_normalized');
         $retainedOptionIds = [];
 
         foreach ($existingOptions as $existingOption) {
@@ -262,7 +263,7 @@ class SaveShopProductDetails
             $nameNormalized = $this->catalogKey($name);
             $option = $optionId !== null
                 ? $existingOptions->firstWhere('id', $optionId)
-                : $existingOptions->firstWhere('name_normalized', $nameNormalized);
+                : $existingOptionsByName->get($nameNormalized);
             $payload = [
                 'name' => $name,
                 'name_normalized' => $nameNormalized,
@@ -319,6 +320,12 @@ class SaveShopProductDetails
         $product->variants()
             ->whereKey($existingVariants->keys())
             ->update(['combination_key' => null]);
+
+        foreach ($existingVariants as $existingVariant) {
+            $existingVariant->combination_key = null;
+            $existingVariant->syncOriginalAttribute('combination_key');
+        }
+
         $usedSkus = [$this->normalizedSku((string) $product->sku)];
         $retainedIds = [];
 

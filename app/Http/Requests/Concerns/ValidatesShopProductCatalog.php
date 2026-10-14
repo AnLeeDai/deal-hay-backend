@@ -68,7 +68,8 @@ trait ValidatesShopProductCatalog
                 $existingVariant = filled($variant['id'] ?? null)
                     ? $existingVariants->get((string) $variant['id'])
                     : null;
-                $optionValues = is_array($variant['option_values'] ?? null)
+                $hasExplicitOptionValues = is_array($variant['option_values'] ?? null);
+                $optionValues = $hasExplicitOptionValues
                     ? $variant['option_values']
                     : ($existingVariant instanceof ShopProductVariant ? $existingVariant->optionValueMap() : []);
                 $normalizedOptionValues = [];
@@ -84,12 +85,14 @@ trait ValidatesShopProductCatalog
                     $canonicalOptionNames,
                     ['Màu sắc', 'Mau sac', 'Color'],
                     $variant['color'] ?? null,
+                    ! $hasExplicitOptionValues,
                 );
                 $this->applyLegacyOptionValue(
                     $normalizedOptionValues,
                     $canonicalOptionNames,
                     ['Kích thước', 'Kich thuoc', 'Size'],
                     $variant['size'] ?? null,
+                    ! $hasExplicitOptionValues,
                 );
 
                 return [
@@ -334,7 +337,7 @@ trait ValidatesShopProductCatalog
         return $values;
     }
 
-    private function applyLegacyOptionValue(array &$optionValues, $canonicalNames, array $aliases, mixed $value): void
+    private function applyLegacyOptionValue(array &$optionValues, $canonicalNames, array $aliases, mixed $value, bool $overwrite): void
     {
         if (! filled($value)) {
             return;
@@ -344,7 +347,9 @@ trait ValidatesShopProductCatalog
             $canonicalName = $canonicalNames->get($this->catalogKey($alias));
 
             if ($canonicalName !== null) {
-                $optionValues[$canonicalName] = Str::squish((string) $value);
+                if ($overwrite || ! array_key_exists($canonicalName, $optionValues)) {
+                    $optionValues[$canonicalName] = Str::squish((string) $value);
+                }
 
                 return;
             }

@@ -65,7 +65,7 @@ ENV APP_ENV=production \
     LOG_CHANNEL=stderr \
     LOG_LEVEL=info \
     PORT=10000 \
-    REVERB_SERVER_HOST=127.0.0.1 \
+    REVERB_SERVER_HOST=0.0.0.0 \
     QUEUE_NAMES=realtime,images,default
 
 USER app

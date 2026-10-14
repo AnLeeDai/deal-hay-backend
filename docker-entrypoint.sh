@@ -17,7 +17,7 @@ if [ "${APP_ENV:-production}" != "production" ] \
     touch "${DB_DATABASE}"
 fi
 
-if [ "$#" -gt 0 ] && [ "$1" != "start" ] && [ "$1" != "web" ] && [ "$1" != "worker" ]; then
+if [ "$#" -gt 0 ] && [ "$1" != "start" ] && [ "$1" != "web" ] && [ "$1" != "reverb" ] && [ "$1" != "worker" ]; then
     exec "$@"
 fi
 
@@ -27,11 +27,19 @@ if [ "${1:-start}" != "start" ]; then
     role="$1"
 fi
 
+if [ "$role" = "reverb" ]; then
+    export REVERB_SERVER_HOST=0.0.0.0
+    export REVERB_SERVER_PORT="${PORT:-10000}"
+fi
+
 php artisan optimize --no-interaction
 
 case "$role" in
     web)
         exec /usr/bin/supervisord -c /etc/supervisor/conf.d/deal-hay.conf
+        ;;
+    reverb)
+        exec php artisan reverb:start --host="$REVERB_SERVER_HOST" --port="$REVERB_SERVER_PORT" --no-interaction
         ;;
     worker)
         exec /usr/bin/supervisord -c /etc/supervisor/conf.d/deal-hay-worker.conf

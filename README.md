@@ -25,41 +25,104 @@ The local `.env.example` intentionally contains only values that differ from app
 
 ## Docker
 
-The same image is used by the HTTP/Reverb service and the queue/scheduler worker:
+One Dockerfile builds an image with three runtime roles:
+
+| Service | `DEPLOY_ROLE` | Local address | Processes |
+| --- | --- | --- | --- |
+| `web` | `web` | `http://localhost:8000` | FrankenPHP/Caddy and Laravel API |
+| `reverb` | `reverb` | `http://localhost:8081` | Reverb HTTP/WebSocket server |
+| `worker` | `worker` | No HTTP port | Database queues and scheduler |
 
 ```bash
 docker compose build
 docker compose run --rm web php artisan migrate --force
-docker compose up
+docker compose up -d
+docker compose logs -f web reverb worker
 ```
 
-Compose is isolated from the host `.env`: it uses a dedicated SQLite/storage volume and local mail/media drivers. The API is available at `http://localhost:8000`; Reverb is also exposed directly on `http://localhost:8081` for the local frontend configuration.
+Compose uses a dedicated SQLite/storage volume and local mail/media drivers. Containers publish broadcasts to `http://reverb:10000`; browsers connect to `ws://localhost:8081`. All three containers use the same database, cache store, and cache prefix. Run migrations before starting the services for the first time.
 
 ## Render production deployment
 
-`render.yaml` provisions two paid services in Singapore:
+Render exposes one public HTTP port per Web Service, so the API and realtime server have separate services and URLs. Each can use Render's default `PORT=10000` because they run in separate containers. A Background Worker processes the queue without an HTTP port. See [Render port binding](https://render.com/docs/web-services#port-binding) and [Background Workers](https://render.com/docs/background-workers).
 
-- `deal-hay-api`: FrankenPHP/Caddy, Laravel HTTP, and Reverb; health check at `/up`.
+### Update the existing API service manually
+
+Keep the existing `deal-hay-backend` Web Service to preserve `https://deal-hay-backend.onrender.com`. Create a second Docker Web Service for Reverb and a Docker Background Worker from the same backend repository, branch, and Dockerfile. Use the same Render region for all three.
+
+| Render service | Type | Environment | Health check | Pre-deploy command |
+| --- | --- | --- | --- | --- |
+| Existing `deal-hay-backend` | Web Service | `DEPLOY_ROLE=web` | `/up` | `php artisan migrate --force` |
+| New `deal-hay-reverb` | Web Service | `DEPLOY_ROLE=reverb` | `/up` | None |
+| New `deal-hay-worker` | Background Worker | `DEPLOY_ROLE=worker` | None | None |
+
+Leave the Docker command empty so the image's entrypoint selects the role. Link a common environment group to all three services with the existing `APP_KEY`, database credentials, Reverb credentials, and application/provider settings. In particular, these values must match between the API and worker:
+
+```env
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://deal-hay-backend.onrender.com
+DB_CONNECTION=mysql
+DB_URL=mysql://USER:PASSWORD@HOST:PORT/DATABASE
+CACHE_STORE=database
+CACHE_PREFIX=deal-hay-cache
+QUEUE_CONNECTION=database
+QUEUE_NAMES=realtime,images,default
+SESSION_DRIVER=database
+BROADCAST_CONNECTION=reverb
+```
+
+Set the same `REVERB_APP_ID`, `REVERB_APP_KEY`, and `REVERB_APP_SECRET` on all three services. Reuse existing credentials when updating an existing deployment. Set `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, and `REVERB_ALLOWED_ORIGINS` for the Vercel frontend domains that should connect.
+
+After creating the realtime service, open its **Connect → Internal** details and configure the publisher endpoint on all three services. Use its actual internal hostname, without a protocol or port in `REVERB_HOST`:
+
+```env
+REVERB_HOST=YOUR_REVERB_INTERNAL_HOSTNAME
+REVERB_PORT=10000
+REVERB_SCHEME=http
+REVERB_PUBLIC_HOST=deal-hay-reverb.onrender.com
+REVERB_PUBLIC_PORT=443
+REVERB_PUBLIC_SCHEME=https
+```
+
+Replace `deal-hay-reverb.onrender.com` with the actual public hostname Render assigns. `REVERB_HOST` is used by the API/worker to publish over the private network; `REVERB_PUBLIC_HOST` is returned to browsers for their WebSocket connection. Browsers need the public hostname. On a free Reverb Web Service, private inbound networking is unavailable; a temporary public publisher endpoint uses that public hostname with `REVERB_PORT=443` and `REVERB_SCHEME=https`. See [Render private networking](https://render.com/docs/private-network).
+
+Reverb binds to `0.0.0.0:$PORT` automatically in its container. Keep `REVERB_SERVER_HOST` and `REVERB_SERVER_PORT` unset in the Dashboard; the entrypoint sets them before caching Laravel configuration. Render terminates TLS, so the server inside the container uses HTTP.
+
+Redeploy all three services after updating environment variables. The API's `/up` checks the API, database, and cache independently of worker startup. The realtime service's `/up` returns `{"health":"OK"}` from Reverb itself. If that JSON appears at the API URL, check that the API service has `DEPLOY_ROLE=web` and that the URLs point to the intended services.
+
+Check `https://deal-hay-backend.onrender.com/ready` after deploying. It returns HTTP `200` with `status: ok` when database, cache, outbox worker, and Reverb checks pass, or HTTP `503` with `status: degraded` and the failed checks. Keep Render's API health check at `/up` so a worker/realtime outage does not prevent the API from deploying.
+
+If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPLOY_ROLE=worker`, and confirm its `DB_URL`, `CACHE_STORE`, and `CACHE_PREFIX` match the API. The supervised queue command is `php artisan queue:work database_outbox --queue=realtime,images,default`; the realtime queue must be included for heartbeat recording. A worker started on the ordinary `database` queue connection does not record this outbox heartbeat. A stopped worker is reported within two minutes. If `reverb` fails, check the publisher hostname/port and matching Reverb credentials/origins.
+
+### Deploy with the Blueprint
+
+`render.yaml` provisions three paid services in Singapore:
+
+- `deal-hay-api`: FrankenPHP/Caddy and Laravel HTTP; health check at `/up`.
+- `deal-hay-reverb`: standalone Reverb; health check at `/up`.
 - `deal-hay-worker`: all database queues plus `schedule:work`.
+
+The Blueprint uses `deal-hay-api` as the API name. To adopt the existing `deal-hay-backend` service, update the API's `name` and every `fromService.name: deal-hay-api` reference to the existing service name before syncing. Preserve the existing `APP_KEY` and Reverb credentials in the shared environment group.
 
 The Blueprint assumes `deal-hay-backend` is the Git repository root. If it is later placed in a monorepo, update `dockerfilePath` and `dockerContext` relative to that repository root before syncing the Blueprint.
 
 The API service runs `php artisan migrate --force` as Render's pre-deploy command. The runtime entrypoint then runs `php artisan optimize`, after production environment variables are available. No persistent disk is required because the database, cache/session data, queues, and R2 media are external.
 
-FrankenPHP/Caddy is the public listener on Render's `PORT` (default `10000`). Reverb listens on `127.0.0.1:8081`, and Caddy forwards `/app/*` and `/apps/*` to it. Keep `REVERB_SERVER_HOST=127.0.0.1` in production. If `/up` returns `{"health":"OK"}` while `/api` returns plain-text `Not found.`, traffic is reaching Reverb directly; redeploy with only the Caddy port exposed. Local Compose overrides the Reverb host to `0.0.0.0` for its direct `8081` mapping.
+The Blueprint derives `APP_URL` from the API's `RENDER_EXTERNAL_URL`, publisher host/port from the realtime service's private `host`/`port`, and browser host from its `RENDER_EXTERNAL_HOSTNAME`. `fromService.property: host` provides an internal hostname; it does not provide the public `onrender.com` hostname. See [Render service property references](https://render.com/docs/blueprint-spec#referencing-service-properties).
 
 The image removes FrankenPHP's inherited `CAP_NET_BIND_SERVICE` before switching to the `app` user, following [FrankenPHP's guidance for running without capabilities](https://frankenphp.dev/docs/docker/#running-with-no-capabilities). Port `10000` does not need that capability. Restricted runtimes can otherwise reject execution with `couldn't exec frankenphp: EPERM`, leaving no public HTTP listener. The build also runs `frankenphp version` as `app` to verify the executable.
 
 Create a Render Blueprint from this repository and fill every blank value in the `deal-hay-production` environment group before the first successful deploy. In particular:
 
 - Generate `APP_KEY` once with `php artisan key:generate --show`; never regenerate it during startup.
-- Set `APP_URL` to the public Render API URL and `FRONTEND_URL` to the production Vercel URL.
+- Set `FRONTEND_URL` to the production Vercel URL. The Blueprint sets `APP_URL` per service automatically.
 - Set `DB_URL` to the external MySQL connection URL.
 - Set the Resend, administrator, and R2 values declared in `render.yaml`.
-- Reverb derives its public hostname from `APP_URL`; production defaults to port `443` and scheme `https`.
+- The Blueprint sets Reverb's public hostname automatically, with port `443` and scheme `https`.
 - Do not add `PORT`; Render provides it automatically.
 
-If an environment variable is removed from `render.yaml`, remove the stale value from the Render Dashboard as well. Render preserves dashboard variables that a later Blueprint revision omits.
+Remove stale per-service Dashboard overrides for `CACHE_STORE`, `CACHE_PREFIX`, and `REVERB_*` that conflict with the shared group or Blueprint. Render preserves variables that a later Blueprint revision omits; this includes old `REVERB_HOST`, `REVERB_PORT`, and `REVERB_PUBLIC_HOST` values in an existing environment group.
 
 The configured pre-deploy command and background worker require paid Render compute. For a free web-service experiment, migrations must be run manually and realtime/background work will not be production-ready.
 

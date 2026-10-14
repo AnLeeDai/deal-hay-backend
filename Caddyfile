@@ -13,10 +13,5 @@
 		format json
 	}
 
-	route {
-		@reverb path /app/* /apps/*
-		reverse_proxy @reverb 127.0.0.1:8081
-
-		php_server
-	}
+	php_server
 }

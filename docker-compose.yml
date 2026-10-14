@@ -7,6 +7,10 @@ x-app-environment: &app-environment
   FRONTEND_URL: http://localhost:3000
   DB_CONNECTION: sqlite
   DB_DATABASE: /app/storage/database.sqlite
+  CACHE_STORE: database
+  CACHE_PREFIX: deal-hay-cache
+  QUEUE_CONNECTION: database
+  SESSION_DRIVER: database
   BROADCAST_CONNECTION: reverb
   MAIL_MAILER: log
   MAIL_FROM_ADDRESS: no-reply@example.com
@@ -22,8 +26,12 @@ x-app-environment: &app-environment
   REVERB_APP_ID: local
   REVERB_APP_KEY: local
   REVERB_APP_SECRET: local
-  REVERB_PORT: "8081"
+  REVERB_HOST: reverb
+  REVERB_PORT: "10000"
   REVERB_SCHEME: http
+  REVERB_PUBLIC_HOST: localhost
+  REVERB_PUBLIC_PORT: "8081"
+  REVERB_PUBLIC_SCHEME: http
 
 services:
   web:
@@ -34,10 +42,22 @@ services:
       <<: *app-environment
       DEPLOY_ROLE: web
       PORT: "10000"
-      REVERB_SERVER_HOST: 0.0.0.0
     ports:
       - "8000:10000"
-      - "8081:8081"
+    volumes:
+      - deal-hay-storage:/app/storage
+    restart: unless-stopped
+
+  reverb:
+    image: deal-hay-backend:local
+    build:
+      context: .
+    environment:
+      <<: *app-environment
+      DEPLOY_ROLE: reverb
+      PORT: "10000"
+    ports:
+      - "8081:10000"
     volumes:
       - deal-hay-storage:/app/storage
     restart: unless-stopped

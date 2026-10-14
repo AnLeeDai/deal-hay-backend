@@ -4,7 +4,6 @@ namespace App\Providers;
 
 use App\Models\User;
 use App\Services\OutboxWorkerHealth;
-use App\Services\ReverbProtocolHealth;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Notifications\ResetPassword as ResetPasswordNotification;
 use Illuminate\Foundation\Events\DiagnosingHealth;
@@ -39,8 +38,7 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(Looping::class, function (Looping $event): void {
             $realtimeQueue = (string) config('queue.connections.database_outbox.queue', 'realtime');
 
-            if (! app()->isProduction()
-                || $event->connectionName !== 'database_outbox'
+            if ($event->connectionName !== 'database_outbox'
                 || ! in_array($realtimeQueue, explode(',', $event->queue), true)) {
                 return;
             }
@@ -61,13 +59,6 @@ class AppServiceProvider extends ServiceProvider
 
             DB::connection()->getServerVersion();
             Cache::store((string) config('cache.default'))->get('__deal_hay_health__');
-            app(OutboxWorkerHealth::class)->assertHealthy();
-
-            if (config('broadcasting.default') !== 'reverb') {
-                return;
-            }
-
-            app(ReverbProtocolHealth::class)->assertHealthy();
         });
     }
 

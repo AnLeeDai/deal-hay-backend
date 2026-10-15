@@ -82,6 +82,7 @@ class UpdateUserProfile
                 expiresInMinutes: self::EMAIL_CHANGE_CODE_TTL_MINUTES,
             ));
         } catch (Throwable $throwable) {
+            Cache::forget($this->emailChangeCacheKey($user));
             report($throwable);
 
             throw ValidationException::withMessages([

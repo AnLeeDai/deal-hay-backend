@@ -139,7 +139,11 @@ envVarGroups:
         value: database
       - key: MAIL_MAILER
         value: resend
+      # Set this to an address on your verified Resend domain in the Dashboard.
       - key: MAIL_FROM_ADDRESS
+      - key: MAIL_FROM_NAME
+        value: Deal Hay
+      # Fill the existing Resend API key in the Dashboard; never commit its value.
       - key: RESEND_API_KEY
       - key: ADMIN_FULL_NAME
       - key: ADMIN_EMAIL

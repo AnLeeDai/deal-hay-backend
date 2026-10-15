@@ -3,6 +3,8 @@
 namespace App\Http\Requests;
 
 use App\Enums\UserRoleEnum;
+use App\Rules\ValidProvince;
+use App\Rules\ValidWardInProvince;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
@@ -43,8 +45,8 @@ class StoreShopOwnerUpgradeRequest extends FormRequest
             'shop_email' => ['required', 'string', 'email', Rule::unique('users', 'shop_email')->where('role', UserRoleEnum::SHOP_OWNER)->ignore($user)],
             'phone_number' => ['required', 'string', 'regex:/^(\+84|0)[3-9]\d{8}$/', Rule::unique('users', 'phone_number')->where('role', UserRoleEnum::SHOP_OWNER)->ignore($user)],
             'shop_phone_number' => ['required', 'string', 'regex:/^(\+84|0)[3-9]\d{8}$/', Rule::unique('users', 'shop_phone_number')->where('role', UserRoleEnum::SHOP_OWNER)->ignore($user)],
-            'province' => ['required', 'string', 'max:255'],
-            'ward' => ['required', 'string', 'max:255'],
+            'province' => ['required', 'string', 'max:255', new ValidProvince],
+            'ward' => ['required', 'string', 'max:255', new ValidWardInProvince($this->input('province'))],
             'address_detail' => ['required', 'string', 'max:255'],
             'message' => ['string'],
         ];

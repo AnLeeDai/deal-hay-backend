@@ -11,7 +11,7 @@ class SetShopFollow
     public function handle(User $follower, User $shopOwner, bool $following): void
     {
         abort_unless(
-            in_array($follower->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
+            in_array($follower->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER, UserRoleEnum::ADMINISTRATOR], true)
             && (bool) $follower->is_active
             && $shopOwner->role === UserRoleEnum::SHOP_OWNER
             && (bool) $shopOwner->is_active

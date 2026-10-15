@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
-#[Fillable(['shop_owner_id', 'product_category_id', 'sku', 'sku_normalized', 'name', 'description', 'price', 'old_price', 'stock', 'has_variants', 'label', 'image_url', 'is_active'])]
+#[Fillable(['shop_owner_id', 'product_category_id', 'sku', 'sku_normalized', 'name', 'description', 'price', 'old_price', 'video_url', 'advertisement_video_url', 'advertisement_duration_seconds', 'stock', 'has_variants', 'label', 'image_url', 'is_active'])]
 #[Hidden(['old_price'])]
 class ShopProduct extends Model
 {
@@ -61,6 +61,7 @@ class ShopProduct extends Model
         return [
             'price' => 'integer',
             'old_price' => 'integer',
+            'advertisement_duration_seconds' => 'integer',
             'stock' => 'integer',
             'has_variants' => 'boolean',
             'is_active' => 'boolean',
@@ -74,6 +75,29 @@ class ShopProduct extends Model
                 ? $this->productCategory?->name
                 : $this->productCategory()->value('name'),
         );
+    }
+
+    public function regularPrice(?int $salePrice = null): int
+    {
+        $salePrice ??= (int) $this->price;
+
+        if ((int) $this->price <= 0 || (int) $this->old_price <= (int) $this->price) {
+            return $salePrice;
+        }
+
+        return max($salePrice, (int) round($salePrice * (int) $this->old_price / (int) $this->price));
+    }
+
+    public function hasAdvertisement(): bool
+    {
+        return filled($this->advertisement_video_url)
+            && (int) $this->advertisement_duration_seconds >= 5
+            && (int) $this->old_price > (int) $this->price;
+    }
+
+    public function productAdViews(): HasMany
+    {
+        return $this->hasMany(ProductAdView::class);
     }
 
     public function shopOwner(): BelongsTo

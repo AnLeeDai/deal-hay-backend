@@ -41,6 +41,7 @@ class GetPublicProductPage
             'reviews' => $reviewData['reviews'],
             'reviewSummary' => $reviewData['summary'],
             'viewerReview' => $reviewData['viewer_review'],
+            'canReview' => $reviewData['can_review'],
         ];
     }
 }

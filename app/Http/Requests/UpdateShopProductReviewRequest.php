@@ -3,11 +3,18 @@
 namespace App\Http\Requests;
 
 use App\Enums\ShopReactionTypeEnum;
+use App\Services\ShopProductReviewEligibility;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Validation\Rule;
 
 class UpdateShopProductReviewRequest extends InteractWithShopProductReviewRequest
 {
+    public function authorize(): bool
+    {
+        return parent::authorize()
+            && app(ShopProductReviewEligibility::class)->canReview($this->user(), $this->route('shopProduct'));
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *

@@ -8,6 +8,7 @@ use App\Http\Requests\StoreShopOrderRequest;
 use App\Http\Requests\UpdateShopOrderStatusRequest;
 use App\Models\ShopOrder;
 use App\Models\User;
+use App\Services\AddressService;
 use Illuminate\Http\JsonResponse;
 
 class ShopOrderController extends Controller
@@ -17,11 +18,17 @@ class ShopOrderController extends Controller
         private readonly UpdateShopOrderStatus $updateOrderStatus,
     ) {}
 
-    public function store(StoreShopOrderRequest $request): JsonResponse
+    public function store(StoreShopOrderRequest $request, AddressService $addresses): JsonResponse
     {
         /** @var User $shopOwner */
         $shopOwner = $request->user();
-        $replayed = $this->createOrder->handle($shopOwner, $request->validated());
+        $data = $request->validated();
+        $data['shipping_address'] = $addresses->formatShippingAddress(
+            $data['shipping_address'],
+            (int) $data['shipping_province_code'],
+            (int) $data['shipping_ward_code'],
+        );
+        $replayed = $this->createOrder->handle($shopOwner, $data);
 
         return response()->json([
             'message' => $replayed

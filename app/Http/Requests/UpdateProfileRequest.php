@@ -2,9 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\ValidProvince;
+use App\Rules\ValidWardInProvince;
+use App\Services\AddressService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class UpdateProfileRequest extends FormRequest
 {
@@ -46,12 +50,40 @@ class UpdateProfileRequest extends FormRequest
                     ->where(fn ($query) => $query->where('role', $user?->role))
                     ->ignore($user?->getKey()),
             ],
-            'province' => ['sometimes', 'string', 'max:255'],
-            'ward' => ['sometimes', 'string', 'max:255'],
+            'province' => ['sometimes', 'nullable', 'string', 'max:255', new ValidProvince],
+            'ward' => ['sometimes', 'nullable', 'string', 'max:255', new ValidWardInProvince($this->input('province', $user?->province))],
             'address_detail' => ['sometimes', 'string', 'max:255'],
             'email_change_code' => ['sometimes', 'nullable', 'digits:6'],
             'avatar' => ['sometimes', 'file'],
         ];
+    }
+
+    /** @return array<int, \Closure> */
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            if (! $this->hasAny(['province', 'ward', 'address_detail'])) {
+                return;
+            }
+
+            $province = $this->input('province', $this->user()?->province);
+            $ward = $this->input('ward', $this->user()?->ward);
+            $detail = $this->input('address_detail', $this->user()?->address_detail);
+
+            if (blank($province) && blank($ward) && blank($detail)) {
+                return;
+            }
+
+            $addresses = app(AddressService::class);
+
+            if (! $validator->errors()->has('province') && $addresses->provinceCode($province) === null) {
+                $validator->errors()->add('province', 'Vui lòng chọn tỉnh/thành từ danh sách.');
+            }
+
+            if (! $validator->errors()->has('ward') && ! $addresses->wardBelongsToProvince($ward, $province)) {
+                $validator->errors()->add('ward', 'Vui lòng chọn phường/xã thuộc tỉnh/thành đã chọn.');
+            }
+        }];
     }
 
     public function messages(): array

@@ -16,7 +16,7 @@ class StartShopChatRequest extends FormRequest
         $shop = $this->route('shop');
 
         return $user !== null
-            && in_array($user->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
+            && in_array($user->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER, UserRoleEnum::ADMINISTRATOR], true)
             && (bool) $user->is_active
             && $shop instanceof User
             && $shop->role === UserRoleEnum::SHOP_OWNER

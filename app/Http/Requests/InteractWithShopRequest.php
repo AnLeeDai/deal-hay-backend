@@ -19,7 +19,7 @@ class InteractWithShopRequest extends FormRequest
 
         return $user !== null
             && $shop instanceof User
-            && in_array($user->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
+            && in_array($user->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER, UserRoleEnum::ADMINISTRATOR], true)
             && (bool) $user->is_active
             && $shop->role === UserRoleEnum::SHOP_OWNER
             && (bool) $shop->is_active

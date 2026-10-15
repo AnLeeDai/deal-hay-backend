@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['shop_owner_id', 'idempotency_key', 'request_fingerprint', 'shop_coupon_id', 'order_number', 'customer_name', 'customer_email', 'customer_phone', 'shipping_address', 'status', 'subtotal', 'discount_amount', 'total', 'note', 'completed_at', 'cancelled_at'])]
+#[Fillable(['shop_owner_id', 'customer_id', 'idempotency_key', 'request_fingerprint', 'shop_coupon_id', 'order_number', 'customer_name', 'customer_email', 'customer_phone', 'shipping_address', 'status', 'subtotal', 'discount_amount', 'total', 'note', 'completed_at', 'cancelled_at'])]
 #[Hidden(['idempotency_key', 'request_fingerprint'])]
 class ShopOrder extends Model
 {

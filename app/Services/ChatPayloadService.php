@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\UserRoleEnum;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\User;
@@ -19,7 +20,7 @@ class ChatPayloadService
         $counterpart = $conversation->buyer_id === $viewer->getKey()
             ? $conversation->shopOwner
             : $conversation->buyer;
-        $isShop = $conversation->buyer_id === $viewer->getKey();
+        $isShop = $counterpart->role === UserRoleEnum::SHOP_OWNER;
         $counterpartPayload = $counterpart->toArray();
         $payload = [
             'id' => (string) $conversation->getKey(),
@@ -27,10 +28,10 @@ class ChatPayloadService
             'counterpart' => [
                 'id' => (string) $counterpart->getKey(),
                 'name' => (string) ($isShop
-                    ? ($counterpart->shop_name ?: 'Cửa hàng DealHay')
+                    ? ($counterpart->shop_name ?: $counterpart->full_name)
                     : $counterpart->full_name),
                 'avatar_url' => $isShop
-                    ? $counterpartPayload['shop_avatar_url']
+                    ? ($counterpartPayload['shop_avatar_url'] ?? $counterpartPayload['avatar_url'])
                     : $counterpartPayload['avatar_url'],
                 'is_online' => $counterpartIsOnline,
                 'is_shop' => $isShop,

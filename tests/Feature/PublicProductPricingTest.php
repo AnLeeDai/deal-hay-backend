@@ -96,3 +96,24 @@ it('loads catalog variant prices in one query for multiple products', function (
 
     expect($variantQueries)->toHaveCount(1);
 })->with(['home', 'shop']);
+
+it('publishes original price and ad offer consistently on every product listing', function (string $page): void {
+    $shop = User::factory()->shopOwner()->create();
+    $product = ShopProduct::factory()->for($shop, 'shopOwner')->create([
+        'price' => 80000, 'old_price' => 100000,
+        'advertisement_video_url' => 'https://example.com/ad.mp4', 'advertisement_duration_seconds' => 15,
+    ]);
+    ShopProductVariant::factory()->for($product, 'product')->default()->create(['price' => 120000]);
+    $reference = ShopProduct::factory()->for($shop, 'shopOwner')->create();
+    [$url, $path] = match ($page) {
+        'home' => ['/api/', 'products.data'],
+        'shop' => ['/api/shops/'.$shop->user_code, 'products'],
+        'related' => ['/api/shops/'.$shop->user_code.'/products/'.$reference->slug, 'relatedProducts'],
+    };
+    $response = $this->getJson($url)->assertOk();
+    $index = array_search($product->id, array_column($response->json($path), 'id'), true);
+    expect($index)->not->toBeFalse();
+    $response->assertJsonPath($path.'.'.$index.'.display_original_price', 150000)
+        ->assertJsonPath($path.'.'.$index.'.display_price', 120000)
+        ->assertJsonPath($path.'.'.$index.'.advertisement_available', true);
+})->with(['home', 'shop', 'related']);

@@ -3,6 +3,8 @@
 namespace App\Http\Requests;
 
 use App\Enums\UserRoleEnum;
+use App\Rules\ValidProvince;
+use App\Rules\ValidWardInProvince;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 
@@ -51,8 +53,10 @@ class StoreShopOrderRequest extends FormRequest
             'idempotency_key' => ['required', 'uuid'],
             'customer_name' => ['required', 'string', 'max:120'],
             'customer_email' => ['nullable', 'email', 'max:255'],
-            'customer_phone' => ['required', 'string', 'max:30'],
+            'customer_phone' => ['required', 'string', 'regex:/^(\+84|0)[3-9]\d{8}$/'],
             'shipping_address' => ['required', 'string', 'max:1000'],
+            'shipping_province_code' => ['required', 'integer', new ValidProvince(true)],
+            'shipping_ward_code' => ['required', 'integer', new ValidWardInProvince($this->input('shipping_province_code'), true)],
             'coupon_code' => ['nullable', 'string', 'max:40'],
             'note' => ['nullable', 'string', 'max:2000'],
             'items' => ['required', 'array', 'min:1', 'max:100'],

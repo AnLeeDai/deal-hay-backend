@@ -15,7 +15,7 @@ class SetShopReaction
         ?ShopReactionTypeEnum $reaction,
     ): void {
         abort_unless(
-            in_array($customer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
+            in_array($customer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER, UserRoleEnum::ADMINISTRATOR], true)
             && (bool) $customer->is_active
             && $shopOwner->role === UserRoleEnum::SHOP_OWNER
             && (bool) $shopOwner->is_active

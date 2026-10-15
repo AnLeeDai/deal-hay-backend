@@ -10,6 +10,7 @@ use App\Mail\AccountStatusChangedMail;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Notifications\TicketReviewedNotification;
+use App\Services\AddressService;
 use App\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -75,6 +76,12 @@ class ReviewTicket
         if (! is_array($details)) {
             throw ValidationException::withMessages([
                 'general' => 'Ticket nâng cấp Chủ Shop không có thông tin hợp lệ.',
+            ]);
+        }
+
+        if (! app(AddressService::class)->wardBelongsToProvince($details['ward'] ?? null, $details['province'] ?? null)) {
+            throw ValidationException::withMessages([
+                'general' => 'Địa chỉ trong yêu cầu không hợp lệ. Vui lòng yêu cầu người dùng gửi lại tỉnh/thành và phường/xã từ danh sách.',
             ]);
         }
 

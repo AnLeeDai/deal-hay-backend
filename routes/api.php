@@ -7,10 +7,12 @@ use App\Http\Controllers\AdminTicketController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\ChatAttachmentController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\CustomerProductOrderController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\MediaGatewayController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PresenceController;
+use App\Http\Controllers\ProductAdvertisementController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicShopController;
 use App\Http\Controllers\RealtimeConfigController;
@@ -19,6 +21,7 @@ use App\Http\Controllers\ShopCouponController;
 use App\Http\Controllers\ShopFollowController;
 use App\Http\Controllers\ShopInventoryController;
 use App\Http\Controllers\ShopOrderController;
+use App\Http\Controllers\ShopProductPricingController;
 use App\Http\Controllers\ShopProductReviewController;
 use App\Http\Controllers\ShopReactionController;
 use App\Http\Controllers\TicketController;
@@ -75,6 +78,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
     Route::delete('/shops/{shop:user_code}/follow', [ShopFollowController::class, 'destroy'])->name('shops.follow.destroy');
     Route::put('/shops/{shop:user_code}/reaction', [ShopReactionController::class, 'update'])->name('shops.reaction.update');
     Route::delete('/shops/{shop:user_code}/reaction', [ShopReactionController::class, 'destroy'])->name('shops.reaction.destroy');
+    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/orders', [CustomerProductOrderController::class, 'store'])
+        ->scopeBindings()->middleware('throttle:10,1')->name('shops.products.orders.store');
+    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/advertisement', [ProductAdvertisementController::class, 'store'])
+        ->scopeBindings()->middleware('throttle:10,1')->name('shops.products.advertisement.store');
+    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/advertisement/{productAdView}/complete', [ProductAdvertisementController::class, 'complete'])
+        ->scopeBindings()->middleware('throttle:10,1')->name('shops.products.advertisement.complete');
     Route::put('/shops/{shop:user_code}/products/{shopProduct:slug}/review', [ShopProductReviewController::class, 'update'])
         ->scopeBindings()
         ->middleware('throttle:10,1')
@@ -97,6 +106,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
 
     Route::prefix('admin')->name('admin.')->middleware('admin')->group(function (): void {
         Route::get('/users', [AdminUserController::class, 'index'])->name('users.index');
+        Route::post('/users/{user}/chat', [AdminUserController::class, 'startChat'])
+            ->middleware('throttle:start-chat')->name('users.chat.store');
         Route::patch('/users/{user}/toggle-lock', [AdminUserController::class, 'toggleLock'])->name('users.toggle-lock');
         Route::get('/shops', [AdminShopController::class, 'index'])->name('shops.index');
         Route::get('/shops/{shop}', [AdminShopController::class, 'show'])->name('shops.show');
@@ -130,6 +141,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
             ->middleware('throttle:product-write')
             ->name('shop.products.update');
         Route::patch('/shop/products/{shopProduct}/status', [ShopController::class, 'updateProductStatus'])->name('shop.products.status.update');
+        Route::patch('/shop/products/{shopProduct}/pricing', [ShopProductPricingController::class, 'update'])
+            ->middleware('throttle:product-write')->name('shop.products.pricing.update');
         Route::delete('/shop/products/{shopProduct}', [ShopController::class, 'destroyProduct'])->name('shop.products.destroy');
         Route::patch('/shop/products/{shopProduct}/inventory', [ShopInventoryController::class, 'adjust'])->name('shop.products.inventory.adjust');
         Route::post('/shop/coupons', [ShopCouponController::class, 'store'])->name('shop.coupons.store');

@@ -2,11 +2,11 @@
 
 namespace App\Actions;
 
-use App\Enums\UserRoleEnum;
 use App\Models\ShopProduct;
 use App\Models\ShopProductReview;
 use App\Models\User;
 use App\Services\MediaClient;
+use App\Services\ShopProductReviewEligibility;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -17,17 +17,16 @@ class SaveShopProductReview
     public function __construct(
         private readonly MediaClient $images,
         private readonly MediaClient $cleanup,
+        private readonly ShopProductReviewEligibility $eligibility,
     ) {}
 
     /** @param array<string, mixed> $validated */
     public function handle(User $customer, ShopProduct $product, array $validated, ?UploadedFile $image): void
     {
         abort_unless(
-            in_array($customer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
-            && (bool) $customer->is_active
-            && (bool) $product->is_active
-            && $customer->getKey() !== $product->shop_owner_id,
+            $this->eligibility->canReview($customer, $product),
             403,
+            'Bạn cần đặt sản phẩm này trước khi đánh giá.',
         );
 
         $review = ShopProductReview::query()->firstOrNew([

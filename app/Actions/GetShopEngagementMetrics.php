@@ -36,7 +36,7 @@ class GetShopEngagementMetrics
             ->count();
 
         $viewerCanInteract = $viewer !== null
-            && in_array($viewer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
+            && in_array($viewer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER, UserRoleEnum::ADMINISTRATOR], true)
             && (bool) $viewer->is_active
             && $viewer->getKey() !== $shop->getKey();
         $viewerReaction = $viewerCanInteract

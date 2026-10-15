@@ -3,8 +3,12 @@
 namespace App\Http\Requests;
 
 use App\Enums\UserRoleEnum;
+use App\Rules\ValidProvince;
+use App\Rules\ValidWardInProvince;
+use App\Services\AddressService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class UpdateShopRequest extends FormRequest
 {
@@ -39,11 +43,33 @@ class UpdateShopRequest extends FormRequest
                     ->where(fn ($query) => $query->where('role', UserRoleEnum::SHOP_OWNER))
                     ->ignore($user?->getKey()),
             ],
-            'shop_province' => ['sometimes', 'string', 'max:255'],
-            'shop_ward' => ['sometimes', 'string', 'max:255'],
+            'shop_province' => ['sometimes', 'string', 'max:255', new ValidProvince],
+            'shop_ward' => ['sometimes', 'string', 'max:255', new ValidWardInProvince($this->input('shop_province', $user?->shop_province))],
             'shop_address_detail' => ['sometimes', 'string', 'max:255'],
             'email_change_code' => ['sometimes', 'nullable', 'digits:6'],
         ];
+    }
+
+    /** @return array<int, \Closure> */
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            if (! $this->hasAny(['shop_province', 'shop_ward', 'shop_address_detail'])) {
+                return;
+            }
+
+            $province = $this->input('shop_province', $this->user()?->shop_province);
+            $ward = $this->input('shop_ward', $this->user()?->shop_ward);
+            $addresses = app(AddressService::class);
+
+            if (! $validator->errors()->has('shop_province') && $addresses->provinceCode($province) === null) {
+                $validator->errors()->add('shop_province', 'Vui lòng chọn tỉnh/thành từ danh sách.');
+            }
+
+            if (! $validator->errors()->has('shop_ward') && ! $addresses->wardBelongsToProvince($ward, $province)) {
+                $validator->errors()->add('shop_ward', 'Vui lòng chọn phường/xã thuộc tỉnh/thành đã chọn.');
+            }
+        }];
     }
 
     /**

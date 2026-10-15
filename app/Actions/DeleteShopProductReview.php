@@ -2,24 +2,24 @@
 
 namespace App\Actions;
 
-use App\Enums\UserRoleEnum;
 use App\Models\ShopProduct;
 use App\Models\ShopProductReview;
 use App\Models\User;
 use App\Services\MediaClient;
+use App\Services\ShopProductReviewEligibility;
 use Illuminate\Support\Facades\DB;
 
 class DeleteShopProductReview
 {
-    public function __construct(private readonly MediaClient $cleanup) {}
+    public function __construct(
+        private readonly MediaClient $cleanup,
+        private readonly ShopProductReviewEligibility $eligibility,
+    ) {}
 
     public function handle(User $customer, ShopProduct $product): void
     {
         abort_unless(
-            in_array($customer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
-            && (bool) $customer->is_active
-            && (bool) $product->is_active
-            && $customer->getKey() !== $product->shop_owner_id,
+            $this->eligibility->canManageOwnReview($customer, $product),
             403,
         );
 

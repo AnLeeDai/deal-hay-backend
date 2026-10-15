@@ -3,14 +3,16 @@
 namespace App\Actions;
 
 use App\Enums\ShopReactionTypeEnum;
-use App\Enums\UserRoleEnum;
 use App\Models\ShopProduct;
 use App\Models\ShopProductReview;
 use App\Models\User;
+use App\Services\ShopProductReviewEligibility;
 
 class GetShopProductReviews
 {
-    /** @return array{reviews: list<array<string, mixed>>, summary: array<string, int>, viewer_review: array<string, mixed>|null} */
+    public function __construct(private readonly ShopProductReviewEligibility $eligibility) {}
+
+    /** @return array{reviews: list<array<string, mixed>>, summary: array<string, int>, viewer_review: array<string, mixed>|null, can_review: bool} */
     public function productPage(ShopProduct $product, ?User $viewer): array
     {
         $reviews = ShopProductReview::query()
@@ -20,11 +22,7 @@ class GetShopProductReviews
             ->limit(50)
             ->get();
         $reviewCounts = ShopProductReview::query()->whereBelongsTo($product, 'product');
-        $viewerCanReview = $viewer !== null
-            && in_array($viewer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
-            && (bool) $viewer->is_active
-            && $viewer->getKey() !== $product->shop_owner_id;
-        $viewerReview = $viewerCanReview
+        $viewerReview = $this->eligibility->canManageOwnReview($viewer, $product)
             ? ShopProductReview::query()
                 ->whereBelongsTo($product, 'product')
                 ->whereBelongsTo($viewer, 'customer')
@@ -42,6 +40,7 @@ class GetShopProductReviews
             'viewer_review' => $viewerReview instanceof ShopProductReview
                 ? $this->payload($viewerReview)
                 : null,
+            'can_review' => $this->eligibility->canReview($viewer, $product),
         ];
     }
 

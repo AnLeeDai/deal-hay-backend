@@ -32,8 +32,8 @@ class GetChatPage
                 $this->messageLimit($messageLimit),
             );
             $selected->load([
-                'buyer:id,full_name,avatar_url',
-                'shopOwner:id,shop_name,shop_avatar_url',
+                'buyer:id,role,full_name,avatar_url,shop_name,shop_avatar_url',
+                'shopOwner:id,role,full_name,avatar_url,shop_name,shop_avatar_url',
                 'latestMessage' => fn ($query) => $query->select([
                     'chat_messages.id',
                     'chat_messages.chat_conversation_id',
@@ -140,8 +140,8 @@ class GetChatPage
                 ->where('buyer_id', $user->getKey())
                 ->orWhere('shop_owner_id', $user->getKey()))
             ->with([
-                'buyer:id,full_name,avatar_url',
-                'shopOwner:id,shop_name,shop_avatar_url',
+                'buyer:id,role,full_name,avatar_url,shop_name,shop_avatar_url',
+                'shopOwner:id,role,full_name,avatar_url,shop_name,shop_avatar_url',
                 'latestMessage' => fn ($query) => $query->select([
                     'chat_messages.id',
                     'chat_messages.chat_conversation_id',

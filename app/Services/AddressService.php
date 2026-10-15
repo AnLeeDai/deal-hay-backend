@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class AddressService
 {
@@ -12,6 +13,48 @@ class AddressService
     private const array PROVINCE_DIVISION_TYPES = ['tỉnh', 'thành phố trung ương'];
 
     private const array WARD_DIVISION_TYPES = ['phường', 'xã', 'đặc khu'];
+
+    public function provinceCode(mixed $province, bool $useCodes = false): ?int
+    {
+        if ((! is_string($province) && ! is_int($province)) || ($useCodes && ! ctype_digit((string) $province))) {
+            return null;
+        }
+
+        $code = DB::table('addresses')
+            ->whereIn('division_type', self::PROVINCE_DIVISION_TYPES)
+            ->where($useCodes ? 'code' : 'name', $province)
+            ->value('code');
+
+        return $code === null ? null : (int) $code;
+    }
+
+    public function wardBelongsToProvince(mixed $ward, mixed $province, bool $useCodes = false): bool
+    {
+        $provinceCode = $this->provinceCode($province, $useCodes);
+
+        if ($provinceCode === null || (! is_string($ward) && ! is_int($ward)) || ($useCodes && ! ctype_digit((string) $ward))) {
+            return false;
+        }
+
+        return DB::table('addresses')
+            ->whereIn('division_type', self::WARD_DIVISION_TYPES)
+            ->where('parent_code', $provinceCode)
+            ->where($useCodes ? 'code' : 'name', $ward)
+            ->exists();
+    }
+
+    public function formatShippingAddress(string $detail, int $provinceCode, int $wardCode): string
+    {
+        if (! $this->wardBelongsToProvince($wardCode, $provinceCode, true)) {
+            throw ValidationException::withMessages([
+                'shipping_ward_code' => 'Vui lòng chọn phường/xã thuộc tỉnh/thành đã chọn.',
+            ]);
+        }
+
+        $names = DB::table('addresses')->whereIn('code', [$provinceCode, $wardCode])->pluck('name', 'code');
+
+        return implode(', ', [trim($detail), $names[$wardCode], $names[$provinceCode]]);
+    }
 
     /** @return array<int, array{code:int,name:string}> */
     public function provinces(): array

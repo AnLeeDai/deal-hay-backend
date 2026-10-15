@@ -27,7 +27,7 @@ class StartShopChat
     public function handle(User $buyer, User $shop, array $data): array
     {
         abort_unless(
-            in_array($buyer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER], true)
+            in_array($buyer->role, [UserRoleEnum::CUSTOMER, UserRoleEnum::SHOP_OWNER, UserRoleEnum::ADMINISTRATOR], true)
             && (bool) $buyer->is_active
             && $shop->role === UserRoleEnum::SHOP_OWNER
             && (bool) $shop->is_active

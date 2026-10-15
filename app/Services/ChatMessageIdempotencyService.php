@@ -13,6 +13,8 @@ class ChatMessageIdempotencyService
         'conversation',
         'shopProduct.shopOwner',
         'shopProductVariant.optionValues.option',
+        'replyTo.sender',
+        'replyTo.shopProduct',
     ];
 
     /** @param array<string, mixed> $payload */

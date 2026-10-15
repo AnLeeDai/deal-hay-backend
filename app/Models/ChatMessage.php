@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'sender_id',
     'client_message_id',
     'request_fingerprint',
+    'reply_to_id',
     'shop_product_id',
     'shop_product_variant_id',
     'body',
@@ -47,6 +48,11 @@ class ChatMessage extends Model
     public function sender(): BelongsTo
     {
         return $this->belongsTo(User::class, 'sender_id');
+    }
+
+    public function replyTo(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reply_to_id');
     }
 
     public function shopProduct(): BelongsTo

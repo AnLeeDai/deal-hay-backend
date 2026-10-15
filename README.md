@@ -61,6 +61,14 @@ Thay cặp khóa và account ID ví dụ bằng cấu hình thật. Khi chạy l
 
 API tải ảnh vẫn kiểm tra thành viên cuộc trò chuyện. Tuy nhiên, nếu toàn bucket được bật public qua `r2.dev` hoặc custom domain thì URL R2 trực tiếp của ảnh chat cũng có thể truy cập được; tên disk `r2_private` không chặn đường truy cập công khai đó. Xem [public buckets của Cloudflare](https://developers.cloudflare.com/r2/buckets/public-buckets/). Lệnh cũ `app:migrate-chat-attachments-to-private` dùng cho hai bucket tách biệt và sẽ từ chối chạy khi hai disk cùng bucket.
 
+## Trả lời tin nhắn và emoji
+
+Bản cập nhật reply cần migration `2026_10_15_112011_add_reply_to_id_to_chat_messages_table.php`. Chạy `php artisan migrate --force` trước khi phục vụ backend mới. Với Render Free theo cấu hình bên dưới, giữ `RUN_MIGRATIONS=true` ở riêng service API để entrypoint tự chạy migration khi deploy.
+
+Tin gửi có thể kèm `reply_to_id` của một tin trong cùng cuộc trò chuyện. API, lịch sử và sự kiện realtime trả cùng phần trích dẫn `reply_to`; tin cũ vẫn hiển thị bình thường. Nếu tin gốc bị xóa, nội dung tin trả lời vẫn được giữ.
+
+Emoji là ký tự Unicode, hiển thị bằng bộ emoji của hệ điều hành. Frontend có bảng chọn nhanh và vẫn nhận emoji nhập từ bàn phím hệ thống: [Windows + .](https://support.microsoft.com/en-us/windows/keyboard-shortcuts-in-windows-dcc61a57-8ff0-cffe-9796-cb9706c75eec), [Control + Command + Space trên macOS](https://support.apple.com/en-us/102650), hoặc phím emoji trên điện thoại.
+
 ## Docker
 
 One Dockerfile builds an image with four runtime roles:

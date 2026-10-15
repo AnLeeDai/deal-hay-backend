@@ -60,6 +60,7 @@ class ChatPayloadService
             'client_message_id' => (string) $message->client_message_id,
             'conversation_id' => (string) $message->chat_conversation_id,
             'body' => (string) $message->body,
+            'reply_to' => $this->reply($message),
             'read_at' => $message->read_at?->toISOString(),
             'attachment' => $this->attachment($message),
             'product' => $this->product($message),
@@ -80,6 +81,44 @@ class ChatPayloadService
     }
 
     /** @return array<string, mixed>|null */
+    private function reply(ChatMessage $message): ?array
+    {
+        $original = $message->replyTo;
+
+        if ($original === null) {
+            return null;
+        }
+
+        $senderPayload = $original->sender->toArray();
+
+        return [
+            'id' => (string) $original->getKey(),
+            'body' => (string) $original->body,
+            'sender' => [
+                'id' => (string) $original->sender->getKey(),
+                'name' => (string) $original->sender->full_name,
+                'avatar_url' => $senderPayload['avatar_url'],
+            ],
+            'attachment' => $original->attachment_mime ? [
+                'type' => $this->attachmentType($original),
+                'name' => $original->attachment_name,
+            ] : null,
+            'product' => $original->shopProduct ? [
+                'name' => (string) $original->shopProduct->name,
+            ] : null,
+        ];
+    }
+
+    private function attachmentType(ChatMessage $message): string
+    {
+        return match (true) {
+            Str::startsWith((string) $message->attachment_mime, 'image/') => 'image',
+            Str::startsWith((string) $message->attachment_mime, 'video/') => 'video',
+            default => 'file',
+        };
+    }
+
+    /** @return array<string, mixed>|null */
     private function attachment(ChatMessage $message): ?array
     {
         if (! $message->attachment_mime) {
@@ -91,11 +130,7 @@ class ChatPayloadService
             'name' => $message->attachment_name,
             'mime' => $message->attachment_mime,
             'size' => $message->attachment_size,
-            'type' => match (true) {
-                Str::startsWith((string) $message->attachment_mime, 'image/') => 'image',
-                Str::startsWith((string) $message->attachment_mime, 'video/') => 'video',
-                default => 'file',
-            },
+            'type' => $this->attachmentType($message),
         ];
     }
 

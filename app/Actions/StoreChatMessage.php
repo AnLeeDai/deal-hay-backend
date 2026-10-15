@@ -34,6 +34,7 @@ class StoreChatMessage
         $requestFingerprint = $this->idempotency->fingerprint([
             'body' => (string) ($data['body'] ?? ''),
             'attachment_sha256' => $this->attachmentHash($attachment),
+            ...filled($data['reply_to_id'] ?? null) ? ['reply_to_id' => $data['reply_to_id']] : [],
         ]);
         $existingMessage = $this->idempotency->find(
             $conversation,
@@ -61,6 +62,7 @@ class StoreChatMessage
                     'sender_id' => $sender->getKey(),
                     'client_message_id' => $clientMessageId,
                     'request_fingerprint' => $requestFingerprint,
+                    'reply_to_id' => $data['reply_to_id'] ?? null,
                     'body' => (string) (($data['body'] ?? null) ?: match (true) {
                         $storedAttachment['is_image'] => '[Hình ảnh]',
                         $storedAttachment['is_video'] => '[Video]',

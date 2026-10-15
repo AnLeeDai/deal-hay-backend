@@ -3,7 +3,9 @@
 namespace App\Http\Requests;
 
 use App\Models\ChatConversation;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreChatMessageRequest extends FormRequest
 {
@@ -30,6 +32,17 @@ class StoreChatMessageRequest extends FormRequest
             'idempotency_key' => ['required', 'uuid'],
             'client_message_id' => ['required', 'uuid', 'same:idempotency_key'],
             'body' => ['nullable', 'required_without:attachment', 'string', 'max:2000'],
+            'reply_to_id' => [
+                'bail',
+                'nullable',
+                'uuid',
+                Rule::exists('chat_messages', 'id')->where(
+                    fn (Builder $query): Builder => $query->where(
+                        'chat_conversation_id',
+                        $this->route('conversation')?->getKey(),
+                    ),
+                ),
+            ],
             'attachment' => [
                 'nullable',
                 'file',
@@ -48,6 +61,8 @@ class StoreChatMessageRequest extends FormRequest
             'body.required' => 'Vui lòng nhập nội dung tin nhắn.',
             'body.required_without' => 'Vui lòng nhập nội dung hoặc chọn tệp đính kèm.',
             'body.max' => 'Tin nhắn không được vượt quá 2.000 ký tự.',
+            'reply_to_id.uuid' => 'Tin nhắn được trả lời không hợp lệ.',
+            'reply_to_id.exists' => 'Tin nhắn được trả lời không tồn tại trong cuộc trò chuyện này.',
         ];
     }
 }

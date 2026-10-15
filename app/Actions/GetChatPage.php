@@ -108,6 +108,7 @@ class GetChatPage
                 'chat_conversation_id',
                 'sender_id',
                 'client_message_id',
+                'reply_to_id',
                 'shop_product_id',
                 'shop_product_variant_id',
                 'body',
@@ -124,6 +125,8 @@ class GetChatPage
                 'shopProduct:id,shop_owner_id,slug,name,sku,price,stock,has_variants,image_url,is_active',
                 'shopProduct.shopOwner:id,user_code,is_active',
                 'shopProductVariant.optionValues.option',
+                'replyTo.sender:id,full_name,avatar_url',
+                'replyTo.shopProduct:id,name',
             ])
             ->orderByDesc('created_at')
             ->orderByDesc('id');

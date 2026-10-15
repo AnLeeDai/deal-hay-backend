@@ -42,23 +42,24 @@ Thiếu `MAIL_MAILER` sẽ dùng mặc định `log`: API có thể báo đã g�
 
 Mã đăng nhập admin, mã đổi email và liên kết đặt lại mật khẩu được gửi trực tiếp. Email thông báo đổi mật khẩu thành công và khóa/mở khóa tài khoản vẫn cần worker xử lý queue `default`; trên Render Free, dùng `DEPLOY_ROLE=web-worker` và `QUEUE_NAMES=realtime,images,default` cho API như hướng dẫn bên dưới. Nếu mail vẫn lỗi sau khi deploy, kiểm tra log API/worker và Resend Dashboard để phân biệt API key không hợp lệ, domain chưa xác minh hay lỗi giao thư.
 
-## Ảnh đính kèm chat và bucket R2 riêng
+## Dùng một bucket R2 cho ảnh và tin nhắn
 
-Ảnh sản phẩm dùng `R2_BUCKET`, còn ảnh/tệp trong tin nhắn dùng `R2_PRIVATE_BUCKET` qua disk `r2_private`. Hai disk hiện dùng chung `R2_ACCESS_KEY_ID` và `R2_SECRET_ACCESS_KEY`. Token chỉ được cấp quyền bucket công khai sẽ không lưu được ảnh chat.
+Ảnh sản phẩm, avatar và ảnh/tệp trong tin nhắn đều dùng bucket `R2_BUCKET=deal-hay-bucket`. Disk `r2_private` là tên nội bộ của luồng chat, dùng cùng bucket và cặp khóa R2 với disk `r2`; không cần tạo bucket thứ hai. Ảnh chat lưu dưới `chat-media/{conversationId}/...` và được hiển thị qua API kiểm tra thành viên cuộc trò chuyện.
 
-Trên Render, kiểm tra tên `R2_PRIVATE_BUCKET` đúng với bucket đã tạo. Trong Cloudflare **R2 → Manage R2 API Tokens**, tạo token **Object Read & Write**, chọn cả bucket công khai lẫn bucket riêng. Cập nhật cặp **Access Key ID / Secret Access Key** vào `R2_ACCESS_KEY_ID` và `R2_SECRET_ACCESS_KEY` của nhóm env dùng chung, rồi **Save and deploy** API/worker. Xem [cấu hình quyền S3 của Cloudflare R2](https://developers.cloudflare.com/r2/get-started/s3/).
+Trên Render, dùng các biến bên dưới. `R2_PRIVATE_BUCKET` đã được bỏ khỏi cấu hình; nếu còn giá trị cũ trên Dashboard thì có thể xóa, ứng dụng sẽ không dùng biến đó nữa. Sau khi deploy backend mới, cả hai disk đều đọc `R2_BUCKET`. Token R2 cần quyền **Object Read & Write** trên bucket này. Xem [cấu hình quyền S3 của Cloudflare R2](https://developers.cloudflare.com/r2/get-started/s3/).
 
 ```env
 R2_DRIVER=s3
 CHAT_MEDIA_DISK=r2_private
-R2_BUCKET=your-public-bucket
-R2_PRIVATE_BUCKET=your-private-chat-bucket
+R2_BUCKET=deal-hay-bucket
 R2_ACCESS_KEY_ID=replace_with_access_key_id
 R2_SECRET_ACCESS_KEY=replace_with_secret_access_key
 R2_ENDPOINT=https://your-account-id.r2.cloudflarestorage.com
 ```
 
-Thay các giá trị ví dụ bằng cấu hình thật. Bucket chat giữ private; ảnh chỉ được tải qua API kiểm tra hai thành viên cuộc trò chuyện. Lỗi `Không thể tải ảnh lên kho lưu trữ` phát sinh ở bước ghi ảnh; nếu R2 trả `403 AccessDenied`, kiểm tra quyền token và tên bucket riêng. URL công khai `R2_URL` không cấp quyền đọc/ghi bucket chat.
+Thay cặp khóa và account ID ví dụ bằng cấu hình thật. Khi chạy local, dùng `php artisan config:clear` sau khi đổi env; entrypoint trên Render tạo lại config cache khi service khởi động.
+
+API tải ảnh vẫn kiểm tra thành viên cuộc trò chuyện. Tuy nhiên, nếu toàn bucket được bật public qua `r2.dev` hoặc custom domain thì URL R2 trực tiếp của ảnh chat cũng có thể truy cập được; tên disk `r2_private` không chặn đường truy cập công khai đó. Xem [public buckets của Cloudflare](https://developers.cloudflare.com/r2/buckets/public-buckets/). Lệnh cũ `app:migrate-chat-attachments-to-private` dùng cho hai bucket tách biệt và sẽ từ chối chạy khi hai disk cùng bucket.
 
 ## Docker
 

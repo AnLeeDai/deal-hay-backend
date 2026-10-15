@@ -157,7 +157,6 @@ envVarGroups:
       - key: R2_ACCESS_KEY_ID
       - key: R2_SECRET_ACCESS_KEY
       - key: R2_BUCKET
-      - key: R2_PRIVATE_BUCKET
       - key: R2_ENDPOINT
       - key: R2_URL
       - key: REVERB_APP_ID

@@ -9,6 +9,8 @@ class RealtimeConfigController extends Controller
 {
     public function __invoke(Request $request): JsonResponse
     {
+        abort_unless(config('broadcasting.default') === 'reverb', 503, 'Realtime chưa được cấu hình.');
+
         /** @var array<string, mixed> $application */
         $application = config('reverb.apps.apps.0', []);
         /** @var array<string, mixed> $options */

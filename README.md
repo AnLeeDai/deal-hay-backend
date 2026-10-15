@@ -263,6 +263,10 @@ The configured pre-deploy command and background worker require paid Render comp
 
 ## Vercel frontend
 
+Chat và thông báo dùng một kết nối Echo/Reverb chung, giữ kết nối khi chuyển trang. Tin nhắn mới, trạng thái đã đọc và badge cập nhật theo sự kiện WebSocket; không có fallback tải lại trang mỗi 15 giây. Sau khi subscribe hoặc kết nối lại, frontend lấy một snapshot để bù dữ liệu bị lỡ. Heartbeat định kỳ chỉ cập nhật trạng thái online, không tải tin nhắn.
+
+Để xác minh trên trình duyệt, mở DevTools → Network → WS: kết nối `/app/{REVERB_APP_KEY}` phải nhận HTTP `101`, sau đó có `pusher:subscription_succeeded` cho kênh cá nhân. Khi gửi từ tài khoản khác, phải có frame `message.sent` ngay khi queue worker publish, không cần đợi refresh trang. Nếu UI báo mất kết nối, kiểm tra `/ready`, log worker, public hostname/origins và `/api/broadcasting/auth`; nút **Kết nối lại** sẽ lấy lại cấu hình và tạo socket mới. Cấu hình backend cần `BROADCAST_CONNECTION=reverb`; endpoint realtime trả `503` nếu broadcaster đang tắt.
+
 Configure the current frontend's API variable for each Vercel environment and redeploy after changing it:
 
 ```env

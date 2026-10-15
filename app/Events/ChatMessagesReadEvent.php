@@ -29,6 +29,8 @@ class ChatMessagesReadEvent implements ShouldBroadcast
         public readonly array $messageIds,
         public readonly string $readAt,
         public readonly string $readThroughAt,
+        /** @var list<string> */
+        public readonly array $participantIds,
     ) {}
 
     public function broadcastQueue(): string
@@ -39,7 +41,13 @@ class ChatMessagesReadEvent implements ShouldBroadcast
     /** @return array<int, PrivateChannel> */
     public function broadcastOn(): array
     {
-        return [new PrivateChannel('chat.'.$this->conversationId)];
+        return [
+            new PrivateChannel('chat.'.$this->conversationId),
+            ...array_map(
+                fn (string $participantId): PrivateChannel => new PrivateChannel('user-chat.'.$participantId),
+                array_values(array_unique($this->participantIds ?? [])),
+            ),
+        ];
     }
 
     public function broadcastAs(): string

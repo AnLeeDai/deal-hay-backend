@@ -22,6 +22,7 @@ class PublicShopProductPayload
             'name' => (string) $product->name,
             'category' => (string) $product->productCategory->name,
             'price' => (int) $product->price,
+            'display_price' => self::displayPrice($product),
             'stock' => (int) $product->stock,
             'has_variants' => (bool) $product->has_variants,
             'label' => $product->label,
@@ -35,7 +36,7 @@ class PublicShopProductPayload
     }
 
     /** @return array<string, mixed> */
-    public static function forShop(ShopProduct $product): array
+    public static function forShop(ShopProduct $product, bool $includeVariants = true): array
     {
         $payload = $product->toArray();
 
@@ -47,6 +48,7 @@ class PublicShopProductPayload
             'category' => (string) $product->productCategory->name,
             'description' => $product->description,
             'price' => (int) $product->price,
+            'display_price' => self::displayPrice($product),
             'stock' => (int) $product->stock,
             'has_variants' => (bool) $product->has_variants,
             'label' => $product->label,
@@ -68,7 +70,7 @@ class PublicShopProductPayload
                     'values' => $option->values->pluck('value')->map('strval')->all(),
                 ])->all()
                 : [],
-            'variants' => $product->relationLoaded('variants')
+            'variants' => $includeVariants && $product->relationLoaded('variants')
                 ? $product->variants->map(fn (ShopProductVariant $variant): array => [
                     'id' => (string) $variant->id,
                     'sku' => (string) $variant->sku,
@@ -82,5 +84,18 @@ class PublicShopProductPayload
                 ])->all()
                 : [],
         ];
+    }
+
+    private static function displayPrice(ShopProduct $product): int
+    {
+        $activeVariants = $product->variants
+            ->where('is_active', true)
+            ->whereNull('retired_at');
+        $variant = $activeVariants->first(fn (ShopProductVariant $variant): bool => $variant->is_default && $variant->stock > 0)
+            ?? $activeVariants->first(fn (ShopProductVariant $variant): bool => $variant->stock > 0)
+            ?? $activeVariants->firstWhere('is_default', true)
+            ?? $activeVariants->first();
+
+        return (int) ($variant?->price ?? $product->price);
     }
 }

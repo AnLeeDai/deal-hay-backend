@@ -96,7 +96,8 @@ class ShopProduct extends Model
         return $this->hasMany(ShopProductVariant::class)
             ->whereNull('retired_at')
             ->orderBy('position')
-            ->orderBy('created_at');
+            ->orderBy('created_at')
+            ->orderBy('id');
     }
 
     public function allVariants(): HasMany

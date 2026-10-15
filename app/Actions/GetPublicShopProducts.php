@@ -29,11 +29,16 @@ class GetPublicShopProducts
             ])
             ->whereBelongsTo($shop, 'shopOwner')
             ->where('is_active', true)
-            ->with('productCategory:id,name')
+            ->with([
+                'productCategory:id,name',
+                'variants' => fn ($query) => $query
+                    ->select(['id', 'shop_product_id', 'price', 'stock', 'is_active', 'is_default', 'retired_at'])
+                    ->where('is_active', true),
+            ])
             ->when($except, fn ($query) => $query->whereKeyNot($except->getKey()))
             ->latest()
             ->limit($limit)
             ->get()
-            ->map(fn (ShopProduct $product): array => PublicShopProductPayload::forShop($product));
+            ->map(fn (ShopProduct $product): array => PublicShopProductPayload::forShop($product, includeVariants: false));
     }
 }

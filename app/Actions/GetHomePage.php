@@ -52,6 +52,9 @@ class GetHomePage
             ->with([
                 'productCategory:id,name',
                 'shopOwner:id,user_code,shop_name,shop_avatar_url',
+                'variants' => fn ($query) => $query
+                    ->select(['id', 'shop_product_id', 'price', 'stock', 'is_active', 'is_default', 'retired_at'])
+                    ->where('is_active', true),
             ])
             ->when($category !== '', fn (Builder $query) => $query
                 ->whereHas('productCategory', fn (Builder $query) => $query->where('name', $category)))

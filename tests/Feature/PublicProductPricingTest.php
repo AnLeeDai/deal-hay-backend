@@ -97,11 +97,25 @@ it('loads catalog variant prices in one query for multiple products', function (
     expect($variantQueries)->toHaveCount(1);
 })->with(['home', 'shop']);
 
-it('publishes original price and ad offer consistently on every product listing', function (string $page): void {
+it('keeps the product presentation video available independently of central advertising', function (): void {
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create([
         'price' => 80000, 'old_price' => 100000,
-        'advertisement_video_url' => 'https://example.com/ad.mp4', 'advertisement_duration_seconds' => 15,
+        'video_url' => 'https://example.com/product.mp4',
+    ]);
+
+    $this->getJson('/api/shops/'.$shop->user_code.'/products/'.$product->slug)
+        ->assertOk()
+        ->assertJsonPath('product.video_url', 'https://example.com/product.mp4')
+        ->assertJsonPath('product.advertisement_available', false);
+});
+
+it('publishes offer prices while keeping unverified central advertisements unavailable on every product page', function (string $page, array $legacyAdvertisement): void {
+    $shop = User::factory()->shopOwner()->create();
+    $product = ShopProduct::factory()->for($shop, 'shopOwner')->create([
+        'price' => 80000, 'old_price' => 100000,
+        'video_url' => 'https://example.com/product.mp4',
+        ...$legacyAdvertisement,
     ]);
     ShopProductVariant::factory()->for($product, 'product')->default()->create(['price' => 120000]);
     $reference = ShopProduct::factory()->for($shop, 'shopOwner')->create();
@@ -109,11 +123,24 @@ it('publishes original price and ad offer consistently on every product listing'
         'home' => ['/api/', 'products.data'],
         'shop' => ['/api/shops/'.$shop->user_code, 'products'],
         'related' => ['/api/shops/'.$shop->user_code.'/products/'.$reference->slug, 'relatedProducts'],
+        'detail' => ['/api/shops/'.$shop->user_code.'/products/'.$product->slug, 'product'],
     };
     $response = $this->getJson($url)->assertOk();
-    $index = array_search($product->id, array_column($response->json($path), 'id'), true);
-    expect($index)->not->toBeFalse();
-    $response->assertJsonPath($path.'.'.$index.'.display_original_price', 150000)
-        ->assertJsonPath($path.'.'.$index.'.display_price', 120000)
-        ->assertJsonPath($path.'.'.$index.'.advertisement_available', true);
-})->with(['home', 'shop', 'related']);
+    if ($page !== 'detail') {
+        $index = array_search($product->id, array_column($response->json($path), 'id'), true);
+        expect($index)->not->toBeFalse();
+        $path .= '.'.$index;
+    }
+
+    $response->assertJsonPath($path.'.display_original_price', 150000)
+        ->assertJsonPath($path.'.display_price', 120000)
+        ->assertJsonPath($path.'.advertisement_available', false)
+        ->assertJsonMissingPath($path.'.advertisement_video_url')
+        ->assertJsonMissingPath($path.'.advertisement_duration_seconds');
+})->with(['home', 'shop', 'related', 'detail'])->with([
+    'no seller advertisement' => [[]],
+    'legacy seller advertisement does not enable verified rewards' => [[
+        'advertisement_video_url' => 'https://example.com/legacy-ad.mp4',
+        'advertisement_duration_seconds' => 15,
+    ]],
+]);

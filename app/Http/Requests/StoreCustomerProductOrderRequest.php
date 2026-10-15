@@ -6,12 +6,19 @@ use App\Models\ShopProduct;
 use App\Rules\ValidProvince;
 use App\Rules\ValidWardInProvince;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreCustomerProductOrderRequest extends FormRequest
 {
     protected function prepareForValidation(): void
     {
         $this->merge(['idempotency_key' => $this->header('Idempotency-Key')]);
+        if (is_string($this->input('discount_code'))) {
+            $this->merge(['discount_code' => strtoupper(trim($this->input('discount_code')))]);
+        }
+        if (is_array($this->input('discount_codes'))) {
+            $this->merge(['discount_codes' => array_map(fn ($code) => is_string($code) ? strtoupper(trim($code)) : $code, $this->input('discount_codes'))]);
+        }
     }
 
     public function authorize(): bool
@@ -35,6 +42,9 @@ class StoreCustomerProductOrderRequest extends FormRequest
             'shipping_ward_code' => ['required', 'integer', new ValidWardInProvince($this->input('shipping_province_code'), true)],
             'note' => ['nullable', 'string', 'max:2000'],
             'advertisement_view_id' => ['nullable', 'uuid'],
+            'discount_code' => ['nullable', 'string', 'size:32', Rule::prohibitedIf($this->filled('advertisement_view_id') || $this->filled('discount_codes'))],
+            'discount_codes' => ['nullable', 'array', 'list', 'max:100', Rule::prohibitedIf($this->filled('advertisement_view_id') || $this->filled('discount_code'))],
+            'discount_codes.*' => ['required', 'string', 'size:32', 'distinct'],
         ];
     }
 }

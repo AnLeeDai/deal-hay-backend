@@ -22,8 +22,8 @@ class UpdateShopProductPricingRequest extends FormRequest
             'price' => ['required', 'integer', 'min:1000', 'max:999999999'],
             'old_price' => ['present', 'nullable', 'integer', 'gt:price', 'max:999999999'],
             'video_url' => ['present', 'nullable', 'url:https', 'max:2048'],
-            'advertisement_video_url' => ['present', 'nullable', 'required_with:old_price', 'url:https', 'max:2048'],
-            'advertisement_duration_seconds' => ['present', 'nullable', 'required_with:advertisement_video_url', 'integer', 'min:5', 'max:300'],
+            'advertisement_video_url' => ['prohibited'],
+            'advertisement_duration_seconds' => ['prohibited'],
         ];
     }
 }

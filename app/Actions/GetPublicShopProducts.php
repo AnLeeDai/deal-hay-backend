@@ -24,8 +24,6 @@ class GetPublicShopProducts
                 'price',
                 'old_price',
                 'video_url',
-                'advertisement_video_url',
-                'advertisement_duration_seconds',
                 'stock',
                 'has_variants',
                 'label',

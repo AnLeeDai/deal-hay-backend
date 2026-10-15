@@ -135,8 +135,8 @@ trait ValidatesShopProductCatalog
         return [
             'old_price' => ['nullable', 'integer', 'gt:price', 'max:999999999'],
             'video_url' => ['nullable', 'url:https', 'max:2048'],
-            'advertisement_video_url' => ['nullable', 'required_with:old_price', 'url:https', 'max:2048'],
-            'advertisement_duration_seconds' => ['nullable', 'required_with:advertisement_video_url', 'integer', 'min:5', 'max:300'],
+            'advertisement_video_url' => ['prohibited'],
+            'advertisement_duration_seconds' => ['prohibited'],
             'options' => ['nullable', 'array', 'max:3'],
             'options.*.id' => [
                 'nullable',

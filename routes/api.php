@@ -13,6 +13,7 @@ use App\Http\Controllers\MediaGatewayController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PresenceController;
 use App\Http\Controllers\ProductAdvertisementController;
+use App\Http\Controllers\ProductDiscountCodeController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicShopController;
 use App\Http\Controllers\RealtimeConfigController;
@@ -57,6 +58,9 @@ Route::prefix('addresses')->name('addresses.')->group(function (): void {
 Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
     Route::get('/auth/me', [UserController::class, 'me'])->name('api.auth.me');
     Route::post('/auth/logout', [UserController::class, 'logout'])->name('api.auth.logout');
+    Route::get('/discount-codes', [ProductDiscountCodeController::class, 'index'])->name('discount-codes.index');
+    Route::post('/discount-codes/{productDiscountCode}/save', [ProductDiscountCodeController::class, 'save'])
+        ->middleware('throttle:30,1')->name('discount-codes.save');
 
     Route::post('/shop-owner-upgrade-requests', [TicketController::class, 'storeShopOwnerUpgrade'])
         ->middleware('throttle:3,10')

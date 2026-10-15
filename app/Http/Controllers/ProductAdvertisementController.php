@@ -4,44 +4,44 @@ namespace App\Http\Controllers;
 
 use App\Enums\UserRoleEnum;
 use App\Models\ProductAdView;
+use App\Models\ProductDiscountCode;
 use App\Models\ShopProduct;
 use App\Models\User;
+use App\Services\ProductDiscountCodeService;
+use App\Services\RewardedAdvertisementService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
 
 class ProductAdvertisementController extends Controller
 {
-    public function store(Request $request, User $shop, ShopProduct $shopProduct): JsonResponse
+    public function store(Request $request, User $shop, ShopProduct $shopProduct, RewardedAdvertisementService $advertisements): JsonResponse
     {
         $this->assertAvailable($request, $shop, $shopProduct);
-        $view = ProductAdView::query()->create([
-            'user_id' => $request->user()->getKey(),
-            'shop_product_id' => $shopProduct->getKey(),
-            'video_url' => $shopProduct->advertisement_video_url,
-            'duration_seconds' => $shopProduct->advertisement_duration_seconds,
-            'expires_at' => now()->addHour(),
-        ]);
+        $session = $advertisements->start($request->user(), $shopProduct);
+        $view = $session['view'];
 
-        return response()->json(['id' => $view->getKey(), 'video_url' => $view->video_url, 'duration_seconds' => $view->duration_seconds], 201);
+        return response()->json(['id' => $view->getKey(), 'provider' => $view->provider, 'ad_type' => $view->ad_type, 'presentation' => $session['presentation']], 201);
     }
 
-    public function complete(Request $request, User $shop, ShopProduct $shopProduct, ProductAdView $productAdView): JsonResponse
+    public function complete(Request $request, User $shop, ShopProduct $shopProduct, ProductAdView $productAdView, ProductDiscountCodeService $codes, RewardedAdvertisementService $advertisements): JsonResponse
     {
-        $this->assertAvailable($request, $shop, $shopProduct);
-        abort_unless($productAdView->user_id === $request->user()->getKey()
-            && $productAdView->shop_product_id === $shopProduct->getKey(), 404);
+        $discountCode = DB::transaction(function () use ($request, $shop, $shopProduct, $productAdView, $advertisements): ProductDiscountCode {
+            $shop = User::query()->lockForUpdate()->findOrFail($shop->getKey());
+            $product = ShopProduct::query()->where('shop_owner_id', $shop->getKey())->lockForUpdate()->findOrFail($shopProduct->getKey());
+            $this->assertAvailable($request, $shop, $product);
+            $view = ProductAdView::query()->lockForUpdate()->findOrFail($productAdView->getKey());
+            abort_unless($view->user_id === $request->user()->getKey()
+                && $view->shop_product_id === $product->getKey(), 404);
 
-        if ($productAdView->expires_at->isPast() || $productAdView->shop_order_id !== null
-            || $productAdView->video_url !== $shopProduct->advertisement_video_url
-            || $productAdView->duration_seconds !== (int) $shopProduct->advertisement_duration_seconds
-            || $productAdView->created_at->addSeconds($productAdView->duration_seconds)->isFuture()) {
-            throw ValidationException::withMessages(['advertisement_view_id' => 'Bạn cần xem hết quảng cáo hợp lệ trước khi nhận ưu đãi.']);
-        }
+            return $advertisements->complete($request->user(), $view);
+        }, attempts: 5);
 
-        $productAdView->update(['completed_at' => $productAdView->completed_at ?? now()]);
-
-        return response()->json(['message' => 'Đã mở ưu đãi cho một đơn hàng.', 'id' => $productAdView->getKey()]);
+        return response()->json([
+            'message' => 'Đã nhận mã giảm giá cho sản phẩm. Bạn có thể dùng ngay hoặc lưu dùng sau.',
+            'id' => $productAdView->getKey(),
+            'discount_code' => $codes->payload($discountCode),
+        ]);
     }
 
     private function assertAvailable(Request $request, User $shop, ShopProduct $product): void
@@ -49,6 +49,5 @@ class ProductAdvertisementController extends Controller
         abort_unless($shop->role === UserRoleEnum::SHOP_OWNER && $shop->is_active && $product->is_active
             && $product->shop_owner_id === $shop->getKey(), 404);
         abort_if($shop->getKey() === $request->user()->getKey(), 403);
-        abort_unless($product->hasAdvertisement(), 422, 'Sản phẩm chưa có quảng cáo hoặc ưu đãi khả dụng.');
     }
 }

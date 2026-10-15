@@ -45,8 +45,6 @@ class GetHomePage
                 'name',
                 'price',
                 'old_price',
-                'advertisement_video_url',
-                'advertisement_duration_seconds',
                 'stock',
                 'has_variants',
                 'label',

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\ProductAdView;
+use App\Models\ProductDiscountCode;
 use App\Models\ShopProduct;
 use App\Models\ShopProductVariant;
 use App\Models\User;
@@ -118,12 +119,17 @@ it('returns 404 for completion and 422 for checkout using another products adver
         ->and($view->fresh()->shop_order_id)->toBeNull();
 });
 
-it('replays a discounted order with the same key after consuming its advertisement exactly once', function (): void {
+it('replays a previously issued legacy saved code without redeeming its advertisement twice', function (): void {
     $this->freezeTime();
     $buyer = User::factory()->customer()->create();
     $product = advertisementSecurityProduct();
     $view = advertisementSecurityView($buyer, $product);
-    $payload = advertisementSecurityOrderPayload(['advertisement_view_id' => $view->getKey()]);
+    $code = ProductDiscountCode::query()->create([
+        'user_id' => $buyer->getKey(), 'shop_product_id' => $product->getKey(), 'product_ad_view_id' => $view->getKey(),
+        'code' => Str::upper(Str::random(32)), 'original_price' => 100000, 'sale_price' => 80000,
+        'saved_at' => now(), 'expires_at' => now()->addDays(30),
+    ]);
+    $payload = advertisementSecurityOrderPayload(['discount_code' => $code->code]);
     $base = advertisementSecurityProductUrl($product);
     $key = (string) Str::uuid();
 

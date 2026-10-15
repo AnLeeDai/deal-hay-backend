@@ -216,7 +216,7 @@ class SaveShopProductDetails
     private function productData(array $data): array
     {
         return [
-            ...Arr::only($data, ['name', 'description', 'price', 'old_price', 'video_url', 'advertisement_video_url', 'advertisement_duration_seconds', 'label']),
+            ...Arr::only($data, ['name', 'description', 'price', 'old_price', 'video_url', 'label']),
             'product_category_id' => ProductCategory::query()
                 ->where('name', $data['category'])
                 ->where('is_active', true)

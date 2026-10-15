@@ -69,8 +69,6 @@ class GetShopManagementData
                     'price' => (int) $payload['price'],
                     'old_price' => $product->old_price,
                     'video_url' => $product->video_url,
-                    'advertisement_video_url' => $product->advertisement_video_url,
-                    'advertisement_duration_seconds' => $product->advertisement_duration_seconds,
                     'stock' => (int) $payload['stock'],
                     'has_variants' => (bool) $product->has_variants,
                     'label' => $payload['label'],

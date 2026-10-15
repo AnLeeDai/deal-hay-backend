@@ -44,26 +44,60 @@ it('creates an undiscounted customer or admin order and reserves inventory exact
     $this->withHeader('Idempotency-Key', $key)->postJson($url, customerOrderPayload(['quantity' => 1]))->assertConflict();
 })->with(['customer', 'administrator']);
 
-it('unlocks sale pricing only after a completed ad and consumes the reward once', function (): void {
+it('returns 422 without creating rewards when default Adsterra advertising cannot verify completion', function (): void {
     Sanctum::actingAs(User::factory()->create());
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create([
         'price' => 80000, 'old_price' => 100000, 'stock' => 8,
         'advertisement_video_url' => 'https://example.com/advertisement.mp4', 'advertisement_duration_seconds' => 15,
     ]);
-    $base = customerProductUrl($shop, $product);
-    $ad = $this->postJson($base.'/advertisement')->assertCreated()->json('id');
-    $this->postJson($base.'/advertisement/'.$ad.'/complete')->assertUnprocessable()->assertJsonValidationErrors('advertisement_view_id');
-    $this->withHeader('Idempotency-Key', (string) Str::uuid())->postJson($base.'/orders', customerOrderPayload(['advertisement_view_id' => $ad]))
+    config(['advertising.campaigns' => [
+        'central-adsterra-offer' => [
+            'enabled' => true, 'provider' => 'adsterra_smartlink',
+            'reward_type' => 'fixed', 'reward_value' => 10000,
+        ],
+    ]]);
+
+    $this->postJson(customerProductUrl($shop, $product).'/advertisement')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors([
+            'advertisement' => 'Quảng cáo nhận thưởng hiện chưa khả dụng. Vui lòng thử lại sau.',
+        ]);
+
+    $this->assertDatabaseCount('product_ad_views', 0);
+    $this->assertDatabaseCount('product_discount_codes', 0);
+    $this->assertDatabaseCount('shop_orders', 0);
+    $this->assertDatabaseCount('shop_inventory_movements', 0);
+    expect($product->fresh()->stock)->toBe(8);
+});
+
+it('returns 422 for completed legacy seller video sessions at reward completion and direct checkout', function (): void {
+    $this->freezeTime();
+    $buyer = User::factory()->create();
+    $shop = User::factory()->shopOwner()->create();
+    $product = ShopProduct::factory()->for($shop, 'shopOwner')->create([
+        'price' => 80000, 'old_price' => 100000, 'stock' => 8,
+        'advertisement_video_url' => 'https://example.com/advertisement.mp4', 'advertisement_duration_seconds' => 15,
+    ]);
+    $view = ProductAdView::query()->create([
+        'user_id' => $buyer->id, 'shop_product_id' => $product->id,
+        'video_url' => $product->advertisement_video_url, 'duration_seconds' => 15,
+        'completed_at' => now()->subMinute(), 'expires_at' => now()->addHour(),
+    ]);
+    $url = customerProductUrl($shop, $product);
+    Sanctum::actingAs($buyer);
+
+    $this->postJson($url.'/advertisement/'.$view->id.'/complete')
         ->assertUnprocessable()->assertJsonValidationErrors('advertisement_view_id');
-    $this->travel(15)->seconds();
-    $this->postJson($base.'/advertisement/'.$ad.'/complete')->assertOk();
-    $response = $this->withHeader('Idempotency-Key', (string) Str::uuid())->postJson($base.'/orders', customerOrderPayload(['advertisement_view_id' => $ad]))
-        ->assertCreated()->assertJsonPath('order.subtotal', 200000)->assertJsonPath('order.discount_amount', 40000)->assertJsonPath('order.total', 160000);
-    $this->assertDatabaseHas('product_ad_views', ['id' => $ad, 'shop_order_id' => $response->json('order.id')]);
-    $this->withHeader('Idempotency-Key', (string) Str::uuid())->postJson($base.'/orders', customerOrderPayload(['advertisement_view_id' => $ad]))
+    $this->withHeader('Idempotency-Key', (string) Str::uuid())
+        ->postJson($url.'/orders', customerOrderPayload(['advertisement_view_id' => $view->id]))
         ->assertUnprocessable()->assertJsonValidationErrors('advertisement_view_id');
-    expect($product->fresh()->stock)->toBe(6);
+
+    $this->assertDatabaseHas('product_ad_views', ['id' => $view->id, 'shop_order_id' => null, 'verified_at' => null]);
+    $this->assertDatabaseCount('product_discount_codes', 0);
+    $this->assertDatabaseCount('shop_orders', 0);
+    $this->assertDatabaseCount('shop_inventory_movements', 0);
+    expect($product->fresh()->stock)->toBe(8);
 });
 
 it('rejects another customers ad reward and expired rewards', function (): void {

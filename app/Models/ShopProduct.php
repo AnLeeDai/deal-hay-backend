@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Traits\HasRemoteMedia;
+use App\Services\RewardedAdvertisementService;
 use Database\Factories\ShopProductFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -14,8 +15,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
-#[Fillable(['shop_owner_id', 'product_category_id', 'sku', 'sku_normalized', 'name', 'description', 'price', 'old_price', 'video_url', 'advertisement_video_url', 'advertisement_duration_seconds', 'stock', 'has_variants', 'label', 'image_url', 'is_active'])]
-#[Hidden(['old_price'])]
+#[Fillable(['shop_owner_id', 'product_category_id', 'sku', 'sku_normalized', 'name', 'description', 'price', 'old_price', 'video_url', 'stock', 'has_variants', 'label', 'image_url', 'is_active'])]
+#[Hidden(['old_price', 'advertisement_video_url', 'advertisement_duration_seconds'])]
 class ShopProduct extends Model
 {
     /** @use HasFactory<ShopProductFactory> */
@@ -61,7 +62,6 @@ class ShopProduct extends Model
         return [
             'price' => 'integer',
             'old_price' => 'integer',
-            'advertisement_duration_seconds' => 'integer',
             'stock' => 'integer',
             'has_variants' => 'boolean',
             'is_active' => 'boolean',
@@ -90,9 +90,7 @@ class ShopProduct extends Model
 
     public function hasAdvertisement(): bool
     {
-        return filled($this->advertisement_video_url)
-            && (int) $this->advertisement_duration_seconds >= 5
-            && (int) $this->old_price > (int) $this->price;
+        return app(RewardedAdvertisementService::class)->availableCampaign() !== null;
     }
 
     public function productAdViews(): HasMany

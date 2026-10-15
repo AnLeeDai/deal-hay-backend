@@ -15,9 +15,9 @@ class ShopProductPricingController extends Controller
         DB::transaction(function () use ($request, $shopProduct): void {
             User::query()->lockForUpdate()->findOrFail($request->user()->getKey());
             $product = ShopProduct::query()->where('shop_owner_id', $request->user()->getKey())->lockForUpdate()->findOrFail($shopProduct->getKey());
-            $product->update($request->validated());
+            $product->update($request->safe()->only(['price', 'old_price', 'video_url']));
         }, attempts: 5);
 
-        return response()->json(['message' => 'Đã cập nhật giá và quảng cáo sản phẩm.']);
+        return response()->json(['message' => 'Đã cập nhật giá và thông tin sản phẩm.']);
     }
 }

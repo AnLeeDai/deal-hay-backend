@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Enums\UserRoleEnum;
 use App\Models\ProductAdView;
+use App\Models\ProductDiscountCode;
 use App\Models\ShopOrder;
 use App\Models\ShopProduct;
 use App\Models\ShopProductVariant;
@@ -22,12 +23,22 @@ class CreateCustomerProductOrder
     public function handle(User $customer, User $shop, ShopProduct $product, array $data): ShopOrder
     {
         abort_unless($customer->is_active && $shop->getKey() !== $customer->getKey(), 403);
-        $fingerprint = hash('sha256', json_encode([
+        if (collect(['discount_code', 'discount_codes', 'advertisement_view_id'])->filter(fn ($field) => filled($data[$field] ?? null))->count() > 1) {
+            throw ValidationException::withMessages(['discount_codes' => 'Không được kết hợp các định dạng mã ưu đãi trong cùng yêu cầu.']);
+        }
+        $fingerprintData = [
             $customer->getKey(), $product->getKey(), $data['variant_id'] ?? null, (int) $data['quantity'],
             $data['customer_name'], $data['customer_phone'], $data['shipping_address'],
             (int) $data['shipping_province_code'], (int) $data['shipping_ward_code'],
             $data['note'] ?? null, $data['advertisement_view_id'] ?? null,
-        ], JSON_THROW_ON_ERROR));
+        ];
+        if (filled($data['discount_code'] ?? null)) {
+            $fingerprintData[] = $data['discount_code'];
+        }
+        if (filled($data['discount_codes'] ?? null)) {
+            $fingerprintData[] = $data['discount_codes'];
+        }
+        $fingerprint = hash('sha256', json_encode($fingerprintData, JSON_THROW_ON_ERROR));
 
         return DB::transaction(function () use ($customer, $shop, $product, $data, $fingerprint): ShopOrder {
             // Serialize checkout with product edits and inventory reservations.
@@ -64,20 +75,33 @@ class CreateCustomerProductOrder
             if ($regularPrice > intdiv(4294967295, $quantity)) {
                 throw ValidationException::withMessages(['quantity' => 'Tổng giá trị đơn hàng vượt quá giới hạn cho phép. Vui lòng giảm số lượng.']);
             }
-            $view = null;
             if (filled($data['advertisement_view_id'] ?? null)) {
-                $view = ProductAdView::query()->lockForUpdate()->find($data['advertisement_view_id']);
-                if (! $product->hasAdvertisement() || ! $view || $view->user_id !== $customer->getKey()
-                    || $view->shop_product_id !== $product->getKey() || $view->completed_at === null
-                    || $view->expires_at->isPast() || $view->shop_order_id !== null
-                    || $view->video_url !== $product->advertisement_video_url
-                    || $view->duration_seconds !== (int) $product->advertisement_duration_seconds) {
-                    throw ValidationException::withMessages(['advertisement_view_id' => 'Ưu đãi chưa được mở, đã hết hạn hoặc đã sử dụng.']);
+                throw ValidationException::withMessages(['advertisement_view_id' => 'Phiên quảng cáo cũ không còn được dùng trực tiếp. Vui lòng chọn mã đã lưu trong ví.']);
+            }
+            $selectedCodes = $data['discount_codes'] ?? (filled($data['discount_code'] ?? null) ? [$data['discount_code']] : []);
+            $availableCodes = ProductDiscountCode::query()->whereIn('code', $selectedCodes)->orderBy('id')->lockForUpdate()->get()->keyBy('code');
+            $subtotal = $regularPrice * $quantity;
+            $remaining = $subtotal;
+            $redeemed = [];
+            foreach ($selectedCodes as $selectedCode) {
+                $code = $availableCodes->get($selectedCode);
+                if (! $code || $code->user_id !== $customer->getKey() || $code->shop_product_id !== $product->getKey()
+                    || $code->saved_at === null || $code->used_at !== null || $code->shop_order_id !== null || ! $code->expires_at->isFuture()) {
+                    throw ValidationException::withMessages(['discount_code' => 'Mã giảm giá không hợp lệ, chưa lưu, đã hết hạn hoặc đã sử dụng.']);
+                }
+                $view = ProductAdView::query()->lockForUpdate()->find($code->product_ad_view_id);
+                if (! $view || $view->shop_order_id !== null || $view->completed_at === null
+                    || $view->user_id !== $customer->getKey() || $view->shop_product_id !== $product->getKey()) {
+                    throw ValidationException::withMessages(['discount_code' => 'Ưu đãi của mã giảm giá đã được sử dụng hoặc không hợp lệ.']);
+                }
+                $contribution = min($remaining, $code->discountForOrder($regularPrice, $quantity));
+                if ($contribution > 0) {
+                    $remaining -= $contribution;
+                    $redeemed[] = ['code' => $code, 'view' => $view];
                 }
             }
 
-            $subtotal = $regularPrice * $quantity;
-            $discount = $view ? ($regularPrice - $salePrice) * $quantity : 0;
+            $discount = $subtotal - $remaining;
             $order = ShopOrder::query()->create([
                 'shop_owner_id' => $shop->getKey(),
                 'customer_id' => $customer->getKey(),
@@ -104,7 +128,10 @@ class CreateCustomerProductOrder
                 'subtotal' => $subtotal,
             ]);
             $this->inventory->adjust($product, $variant, -$quantity, 'order_reserved', $customer, $order, "Giữ kho cho đơn {$order->order_number}.");
-            $view?->update(['shop_order_id' => $order->getKey()]);
+            foreach ($redeemed as $reward) {
+                $reward['view']->update(['shop_order_id' => $order->getKey()]);
+                $reward['code']->update(['shop_order_id' => $order->getKey(), 'used_at' => now()]);
+            }
 
             return $order;
         }, attempts: 5);

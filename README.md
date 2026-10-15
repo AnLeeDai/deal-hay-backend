@@ -21,7 +21,26 @@ composer run dev
 - Media disks: local `storage/app/r2` and `storage/app/r2-private`
 - Frontend URL: `http://localhost:3000`
 
-The local `.env.example` intentionally contains only values that differ from application defaults. Add provider credentials only when switching a local service away from its local/log driver.
+The local `.env.example` contains local defaults and placeholders for optional provider credentials. Add provider credentials only when switching a local service away from its local/log driver.
+
+## Gửi email trên Render bằng Resend
+
+File `.env` trên máy local không tự được đưa lên Render. Trong **Environment Groups → deal-hay-production**, điền đủ:
+
+```env
+MAIL_MAILER=resend
+MAIL_FROM_ADDRESS=no-reply@your-verified-domain.com
+MAIL_FROM_NAME="Deal Hay"
+RESEND_API_KEY=re_replace_with_your_real_api_key
+```
+
+Thay địa chỉ và API key ví dụ bằng giá trị thật. `MAIL_FROM_ADDRESS` phải thuộc domain đã xác minh trong Resend. `onboarding@resend.dev` chỉ gửi thử tới email đăng ký tài khoản Resend; gửi tới người dùng khác cần domain riêng đã xác minh. Xem [giới hạn domain thử nghiệm của Resend](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
+
+Liên kết nhóm với API và worker gửi mail. Trong **Environment** của từng service, xóa các biến `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `RESEND_API_KEY` trống hoặc sai nếu chúng đang ghi đè nhóm. Chọn **Save and deploy** sau khi sửa; **Save only** chưa áp dụng cấu hình vào tiến trình đang chạy. Entrypoint của dự án chạy `php artisan optimize` khi khởi động nên cấu hình được cache lại theo env mới. Xem [cấu hình biến môi trường Render](https://render.com/docs/configure-environment-variables).
+
+Thiếu `MAIL_MAILER` sẽ dùng mặc định `log`: API có thể báo đã gửi nhưng email chỉ được ghi vào log. `MAIL_MAILER=resend` sử dụng HTTPS API; không cần `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`. Render Free chặn các cổng SMTP 25, 465 và 587, nên dùng Resend API cho cấu hình này. Xem [giới hạn Render Free](https://render.com/docs/free).
+
+Mã đăng nhập admin, mã đổi email và liên kết đặt lại mật khẩu được gửi trực tiếp. Email thông báo đổi mật khẩu thành công và khóa/mở khóa tài khoản vẫn cần worker xử lý queue `default`; trên Render Free, dùng `DEPLOY_ROLE=web-worker` và `QUEUE_NAMES=realtime,images,default` cho API như hướng dẫn bên dưới. Nếu mail vẫn lỗi sau khi deploy, kiểm tra log API/worker và Resend Dashboard để phân biệt API key không hợp lệ, domain chưa xác minh hay lỗi giao thư.
 
 ## Ảnh đính kèm chat và bucket R2 riêng
 
@@ -103,13 +122,15 @@ QUEUE_CONNECTION=database
 QUEUE_NAMES=realtime,images,default
 SESSION_DRIVER=database
 BROADCAST_CONNECTION=reverb
+MAIL_MAILER=resend
+MAIL_FROM_NAME="Deal Hay"
 LOG_CHANNEL=stderr
 LOG_LEVEL=info
 CORS_ALLOWED_ORIGINS=https://deal-hay.vercel.app,https://deal-hay-fontend.vercel.app
 REVERB_ALLOWED_ORIGINS=deal-hay.vercel.app,deal-hay-fontend.vercel.app
 ```
 
-Nếu database mới, điền `ADMIN_FULL_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE_NUMBER`, `ADMIN_PASSWORD` trước khi API khởi động chạy migrations. Nếu frontend dùng tên miền khác, cập nhật `FRONTEND_URL` và hai danh sách origins theo tên miền thật.
+Điền thêm `MAIL_FROM_ADDRESS` và `RESEND_API_KEY` theo [cấu hình Resend](#gửi-email-trên-render-bằng-resend) ở trên. Nếu database mới, điền `ADMIN_FULL_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE_NUMBER`, `ADMIN_PASSWORD` trước khi API khởi động chạy migrations. Nếu frontend dùng tên miền khác, cập nhật `FRONTEND_URL` và hai danh sách origins theo tên miền thật.
 
 ### 3. Dùng URL công khai của Reverb
 
@@ -259,6 +280,10 @@ Remove stale per-service Dashboard overrides for `CACHE_STORE`, `CACHE_PREFIX`, 
 The configured pre-deploy command and background worker require paid Render compute. For Free compute, use the two-service configuration and `render.free.yaml` described above.
 
 ## Vercel frontend
+
+Chat và thông báo dùng một kết nối Echo/Reverb chung, giữ kết nối khi chuyển trang. Tin nhắn mới, trạng thái đã đọc và badge cập nhật theo sự kiện WebSocket; không có fallback tải lại trang mỗi 15 giây. Sau khi subscribe hoặc kết nối lại, frontend lấy một snapshot để bù dữ liệu bị lỡ. Heartbeat định kỳ chỉ cập nhật trạng thái online, không tải tin nhắn.
+
+Để xác minh trên trình duyệt, mở DevTools → Network → WS: kết nối `/app/{REVERB_APP_KEY}` phải nhận HTTP `101`, sau đó có `pusher:subscription_succeeded` cho kênh cá nhân. Khi gửi từ tài khoản khác, phải có frame `message.sent` ngay khi queue worker publish, không cần đợi refresh trang. Nếu UI báo mất kết nối, kiểm tra `/ready`, log worker, public hostname/origins và `/api/broadcasting/auth`; nút **Kết nối lại** sẽ lấy lại cấu hình và tạo socket mới. Cấu hình backend cần `BROADCAST_CONNECTION=reverb`; endpoint realtime trả `503` nếu broadcaster đang tắt.
 
 Configure the current frontend's API variable for each Vercel environment and redeploy after changing it:
 

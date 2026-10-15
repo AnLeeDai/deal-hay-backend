@@ -91,6 +91,7 @@ class UpdateShopProfile
                 expiresInMinutes: self::EMAIL_CHANGE_CODE_TTL_MINUTES,
             ));
         } catch (Throwable $throwable) {
+            Cache::forget($this->cacheKey($shopOwner));
             report($throwable);
 
             throw ValidationException::withMessages([

@@ -36,6 +36,7 @@ class ChatMessageSentEvent implements ShouldBroadcast
     {
         return [
             new PrivateChannel('chat.'.$this->message->chat_conversation_id),
+            new PrivateChannel('user-chat.'.$this->message->sender_id),
             new PrivateChannel('user-chat.'.$this->recipientId()),
         ];
     }

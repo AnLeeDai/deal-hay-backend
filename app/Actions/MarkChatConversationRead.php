@@ -46,6 +46,10 @@ class MarkChatConversationRead
                     messageIds: array_map('strval', $messageIds),
                     readAt: $readAt->toISOString(),
                     readThroughAt: $readThroughAt->toISOString(),
+                    participantIds: [
+                        (string) $conversation->buyer_id,
+                        (string) $conversation->shop_owner_id,
+                    ],
                 ))->toOthers();
             } while ($messages->count() === self::EVENT_CHUNK_SIZE);
 

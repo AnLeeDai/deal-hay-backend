@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 
+beforeEach(function (): void {
+    config()->set('broadcasting.default', 'reverb');
+});
+
 it('returns browser-safe realtime configuration to authenticated users', function (): void {
     config()->set('reverb.apps.apps.0.key', 'public-test-key');
     config()->set('reverb.apps.apps.0.secret', 'never-expose-this');
@@ -39,6 +43,17 @@ it('returns browser-safe realtime configuration to authenticated users', functio
 it('rejects realtime configuration requests without authentication', function (): void {
     $this->getJson('/api/realtime/config')->assertUnauthorized();
 });
+
+it('returns 503 when the broadcaster cannot publish Reverb events', function (string $broadcaster): void {
+    config()->set('broadcasting.default', $broadcaster);
+    config()->set('reverb.apps.apps.0.key', 'public-test-key');
+    config()->set('reverb.public', ['host' => 'realtime.example.test']);
+    Sanctum::actingAs(User::factory()->customer()->create());
+
+    $this->getJson('/api/realtime/config')
+        ->assertServiceUnavailable()
+        ->assertJsonPath('message', 'Realtime chưa được cấu hình.');
+})->with(['null', 'log', 'pusher']);
 
 it('advertises the HTTPS request endpoint when publisher options still use HTTP port 8081', function (): void {
     $publisherOptions = ['host' => '127.0.0.1', 'port' => 8081, 'scheme' => 'http'];
@@ -197,7 +212,12 @@ it('queues sent and read events with the originating socket excluded', function 
         ->assertJsonPath('body', 'Tin nhắn realtime');
 
     Queue::assertPushedOn('test-realtime', BroadcastEvent::class, fn (BroadcastEvent $job): bool => $job->event instanceof ChatMessageSentEvent
-        && $job->event->socket === '123.456');
+        && $job->event->socket === '123.456'
+        && array_map(strval(...), $job->event->broadcastOn()) === [
+            'private-chat.'.$conversation->getKey(),
+            'private-user-chat.'.$buyer->getKey(),
+            'private-user-chat.'.$shopOwner->getKey(),
+        ]);
 
     Queue::fake([BroadcastEvent::class]);
 
@@ -215,5 +235,10 @@ it('queues sent and read events with the originating socket excluded', function 
     expect($message->refresh()->read_at)->not->toBeNull();
 
     Queue::assertPushedOn('test-realtime', BroadcastEvent::class, fn (BroadcastEvent $job): bool => $job->event instanceof ChatMessagesReadEvent
-        && $job->event->socket === '789.012');
+        && $job->event->socket === '789.012'
+        && array_map(strval(...), $job->event->broadcastOn()) === [
+            'private-chat.'.$conversation->getKey(),
+            'private-user-chat.'.$buyer->getKey(),
+            'private-user-chat.'.$shopOwner->getKey(),
+        ]);
 });

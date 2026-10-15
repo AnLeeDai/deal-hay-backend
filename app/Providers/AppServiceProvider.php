@@ -67,7 +67,10 @@ class AppServiceProvider extends ServiceProvider
         ResetPasswordNotification::createUrlUsing(function (User $user, string $token): string {
             $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
 
-            return $frontendUrl.'/reset-password/'.$token.'?email='.urlencode((string) $user->email);
+            return $frontendUrl.'/reset-password?'.http_build_query([
+                'token' => $token,
+                'email' => (string) $user->email,
+            ]);
         });
 
         if (app()->isProduction()) {

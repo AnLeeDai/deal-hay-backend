@@ -23,6 +23,24 @@ composer run dev
 
 The local `.env.example` intentionally contains only values that differ from application defaults. Add provider credentials only when switching a local service away from its local/log driver.
 
+## Ảnh đính kèm chat và bucket R2 riêng
+
+Ảnh sản phẩm dùng `R2_BUCKET`, còn ảnh/tệp trong tin nhắn dùng `R2_PRIVATE_BUCKET` qua disk `r2_private`. Hai disk hiện dùng chung `R2_ACCESS_KEY_ID` và `R2_SECRET_ACCESS_KEY`. Token chỉ được cấp quyền bucket công khai sẽ không lưu được ảnh chat.
+
+Trên Render, kiểm tra tên `R2_PRIVATE_BUCKET` đúng với bucket đã tạo. Trong Cloudflare **R2 → Manage R2 API Tokens**, tạo token **Object Read & Write**, chọn cả bucket công khai lẫn bucket riêng. Cập nhật cặp **Access Key ID / Secret Access Key** vào `R2_ACCESS_KEY_ID` và `R2_SECRET_ACCESS_KEY` của nhóm env dùng chung, rồi **Save and deploy** API/worker. Xem [cấu hình quyền S3 của Cloudflare R2](https://developers.cloudflare.com/r2/get-started/s3/).
+
+```env
+R2_DRIVER=s3
+CHAT_MEDIA_DISK=r2_private
+R2_BUCKET=your-public-bucket
+R2_PRIVATE_BUCKET=your-private-chat-bucket
+R2_ACCESS_KEY_ID=replace_with_access_key_id
+R2_SECRET_ACCESS_KEY=replace_with_secret_access_key
+R2_ENDPOINT=https://your-account-id.r2.cloudflarestorage.com
+```
+
+Thay các giá trị ví dụ bằng cấu hình thật. Bucket chat giữ private; ảnh chỉ được tải qua API kiểm tra hai thành viên cuộc trò chuyện. Lỗi `Không thể tải ảnh lên kho lưu trữ` phát sinh ở bước ghi ảnh; nếu R2 trả `403 AccessDenied`, kiểm tra quyền token và tên bucket riêng. URL công khai `R2_URL` không cấp quyền đọc/ghi bucket chat.
+
 ## Docker
 
 One Dockerfile builds an image with four runtime roles:

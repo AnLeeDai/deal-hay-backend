@@ -4,12 +4,14 @@ use App\Events\ChatMessageSentEvent;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\User;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use League\Flysystem\UnableToWriteFile;
 
 beforeEach(function (): void {
     config()->set('filesystems.chat_media_disk', 'r2_private');
@@ -65,6 +67,38 @@ it('normalizes image attachments to private WebP objects under the conversation 
     expect($message->attachment_size)->toBe($privateDisk->size($message->attachment_path));
     Event::assertDispatched(ChatMessageSentEvent::class, fn (ChatMessageSentEvent $event): bool => $event->message->is($message));
 });
+
+it('returns 422 without saving or broadcasting a message when private image storage denies writing', function (array $messageFields): void {
+    $conversation = ChatConversation::factory()->create();
+    Sanctum::actingAs($conversation->buyer);
+    Event::fake([ChatMessageSentEvent::class]);
+    Exceptions::fake();
+    $failure = UnableToWriteFile::atLocation('chat-media/'.$conversation->getKey().'/photo.webp', 'AccessDenied');
+    $privateDisk = Mockery::mock(FilesystemAdapter::class);
+    $privateDisk->shouldReceive('put')->once()->with(
+        Mockery::on(fn (string $path): bool => str_starts_with($path, 'chat-media/'.$conversation->getKey().'/') && str_ends_with($path, '.webp')),
+        Mockery::on(fn (string $content): bool => (getimagesizefromstring($content)['mime'] ?? null) === 'image/webp'),
+        ['ContentType' => 'image/webp'],
+    )->andThrow($failure);
+    Storage::shouldReceive('disk')->once()->with('r2_private')->andReturn($privateDisk);
+    $clientMessageId = (string) Str::uuid();
+
+    $response = $this->withHeader('Idempotency-Key', $clientMessageId)
+        ->post('/api/messages/'.$conversation->slug, [
+            ...$messageFields,
+            'client_message_id' => $clientMessageId,
+            'attachment' => UploadedFile::fake()->image('photo.jpg', 64, 64),
+        ], ['Accept' => 'application/json']);
+
+    $response->assertUnprocessable()
+        ->assertJsonValidationErrors(['attachment' => 'Không thể tải ảnh lên kho lưu trữ. Vui lòng thử lại sau.']);
+    $this->assertDatabaseCount('chat_messages', 0);
+    Event::assertNotDispatched(ChatMessageSentEvent::class);
+    Exceptions::assertReported(fn (UnableToWriteFile $exception): bool => $exception === $failure);
+})->with([
+    'image without caption' => [[]],
+    'image with caption' => [['body' => 'Ảnh sản phẩm']],
+]);
 
 it('replays an attachment send without creating another private object or message', function (): void {
     $privateDisk = Storage::fake('r2_private');

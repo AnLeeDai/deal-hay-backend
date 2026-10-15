@@ -71,7 +71,7 @@ it('never issues a new code from old seller video sessions even after elapsed ti
         'expires_at' => now()->addHour(),
     ])->getKey();
 
-    $this->postJson($base.'/advertisement/'.$viewId.'/complete')->assertUnprocessable();
+    $this->postJson($base.'/advertisement/'.$viewId.'/complete')->assertNotFound();
     $this->assertDatabaseCount('product_discount_codes', 0);
     Sanctum::actingAs($otherBuyer);
     $this->postJson($base.'/advertisement/'.$viewId.'/complete')->assertNotFound();
@@ -80,7 +80,7 @@ it('never issues a new code from old seller video sessions even after elapsed ti
 
     Sanctum::actingAs($buyer);
     $this->postJson($base.'/advertisement/'.$viewId.'/complete', ['verified_at' => now()->toISOString(), 'reward_value' => 4294967295])
-        ->assertUnprocessable();
+        ->assertNotFound();
 
     $this->assertDatabaseCount('product_discount_codes', 0);
     expect(ProductAdView::query()->findOrFail($viewId)->completed_at)->toBeNull();

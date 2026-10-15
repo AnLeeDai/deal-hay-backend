@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Models\Traits\HasRemoteMedia;
-use App\Services\RewardedAdvertisementService;
 use Database\Factories\ShopProductFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -86,16 +85,6 @@ class ShopProduct extends Model
         }
 
         return max($salePrice, (int) round($salePrice * (int) $this->old_price / (int) $this->price));
-    }
-
-    public function hasAdvertisement(): bool
-    {
-        return app(RewardedAdvertisementService::class)->availableCampaign() !== null;
-    }
-
-    public function productAdViews(): HasMany
-    {
-        return $this->hasMany(ProductAdView::class);
     }
 
     public function shopOwner(): BelongsTo

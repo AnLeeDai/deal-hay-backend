@@ -54,7 +54,7 @@ function advertisementSecurityOrderPayload(array $attributes = []): array
     ];
 }
 
-it('returns 422 for an advertisement whose video or duration changed before redemption', function (array $changedAdvertisement): void {
+it('keeps retired completion inaccessible when historical video settings change', function (array $changedAdvertisement): void {
     $this->freezeTime();
     $buyer = User::factory()->customer()->create();
     $product = advertisementSecurityProduct();
@@ -64,8 +64,7 @@ it('returns 422 for an advertisement whose video or duration changed before rede
 
     $this->withToken($buyer->createToken('stale-advertisement')->plainTextToken)
         ->postJson($base.'/advertisement/'.$view->getKey().'/complete')
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors('advertisement_view_id');
+        ->assertNotFound();
 
     $this->withHeader('Idempotency-Key', (string) Str::uuid())
         ->postJson($base.'/orders', advertisementSecurityOrderPayload(['advertisement_view_id' => $view->getKey()]))
@@ -80,7 +79,7 @@ it('returns 422 for an advertisement whose video or duration changed before rede
     'changed duration' => [['advertisement_duration_seconds' => 30]],
 ]);
 
-it('returns 422 when attempting to complete an expired advertisement', function (): void {
+it('returns 404 when attempting to complete an expired historical advertisement', function (): void {
     $this->freezeTime();
     $buyer = User::factory()->customer()->create();
     $product = advertisementSecurityProduct();
@@ -91,8 +90,7 @@ it('returns 422 when attempting to complete an expired advertisement', function 
 
     $this->withToken($buyer->createToken('expired-advertisement-completion')->plainTextToken)
         ->postJson(advertisementSecurityProductUrl($product).'/advertisement/'.$view->getKey().'/complete')
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors('advertisement_view_id');
+        ->assertNotFound();
 
     expect($view->fresh()->completed_at)->toBeNull();
 });

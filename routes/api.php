@@ -12,7 +12,6 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\MediaGatewayController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PresenceController;
-use App\Http\Controllers\ProductAdvertisementController;
 use App\Http\Controllers\ProductDiscountCodeController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicShopController;
@@ -84,10 +83,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
     Route::delete('/shops/{shop:user_code}/reaction', [ShopReactionController::class, 'destroy'])->name('shops.reaction.destroy');
     Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/orders', [CustomerProductOrderController::class, 'store'])
         ->scopeBindings()->middleware('throttle:10,1')->name('shops.products.orders.store');
-    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/advertisement', [ProductAdvertisementController::class, 'store'])
-        ->scopeBindings()->middleware('throttle:10,1')->name('shops.products.advertisement.store');
-    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/advertisement/{productAdView}/complete', [ProductAdvertisementController::class, 'complete'])
-        ->scopeBindings()->middleware('throttle:10,1')->name('shops.products.advertisement.complete');
     Route::put('/shops/{shop:user_code}/products/{shopProduct:slug}/review', [ShopProductReviewController::class, 'update'])
         ->scopeBindings()
         ->middleware('throttle:10,1')

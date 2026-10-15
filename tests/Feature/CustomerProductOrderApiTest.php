@@ -44,7 +44,7 @@ it('creates an undiscounted customer or admin order and reserves inventory exact
     $this->withHeader('Idempotency-Key', $key)->postJson($url, customerOrderPayload(['quantity' => 1]))->assertConflict();
 })->with(['customer', 'administrator']);
 
-it('returns 422 without creating rewards when default Adsterra advertising cannot verify completion', function (): void {
+it('returns 404 without creating rewards for the retired advertising session endpoint', function (): void {
     Sanctum::actingAs(User::factory()->create());
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create([
@@ -59,10 +59,7 @@ it('returns 422 without creating rewards when default Adsterra advertising canno
     ]]);
 
     $this->postJson(customerProductUrl($shop, $product).'/advertisement')
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors([
-            'advertisement' => 'Quảng cáo nhận thưởng hiện chưa khả dụng. Vui lòng thử lại sau.',
-        ]);
+        ->assertNotFound();
 
     $this->assertDatabaseCount('product_ad_views', 0);
     $this->assertDatabaseCount('product_discount_codes', 0);
@@ -71,7 +68,7 @@ it('returns 422 without creating rewards when default Adsterra advertising canno
     expect($product->fresh()->stock)->toBe(8);
 });
 
-it('returns 422 for completed legacy seller video sessions at reward completion and direct checkout', function (): void {
+it('returns 404 for retired completion and 422 for direct legacy session checkout', function (): void {
     $this->freezeTime();
     $buyer = User::factory()->create();
     $shop = User::factory()->shopOwner()->create();
@@ -88,7 +85,7 @@ it('returns 422 for completed legacy seller video sessions at reward completion 
     Sanctum::actingAs($buyer);
 
     $this->postJson($url.'/advertisement/'.$view->id.'/complete')
-        ->assertUnprocessable()->assertJsonValidationErrors('advertisement_view_id');
+        ->assertNotFound();
     $this->withHeader('Idempotency-Key', (string) Str::uuid())
         ->postJson($url.'/orders', customerOrderPayload(['advertisement_view_id' => $view->id]))
         ->assertUnprocessable()->assertJsonValidationErrors('advertisement_view_id');

@@ -107,7 +107,7 @@ it('keeps the product presentation video available independently of central adve
     $this->getJson('/api/shops/'.$shop->user_code.'/products/'.$product->slug)
         ->assertOk()
         ->assertJsonPath('product.video_url', 'https://example.com/product.mp4')
-        ->assertJsonPath('product.advertisement_available', false);
+        ->assertJsonMissingPath('product.advertisement_available');
 });
 
 it('publishes offer prices while keeping unverified central advertisements unavailable on every product page', function (string $page, array $legacyAdvertisement): void {
@@ -134,7 +134,7 @@ it('publishes offer prices while keeping unverified central advertisements unava
 
     $response->assertJsonPath($path.'.display_original_price', 150000)
         ->assertJsonPath($path.'.display_price', 120000)
-        ->assertJsonPath($path.'.advertisement_available', false)
+        ->assertJsonMissingPath($path.'.advertisement_available')
         ->assertJsonMissingPath($path.'.advertisement_video_url')
         ->assertJsonMissingPath($path.'.advertisement_duration_seconds');
 })->with(['home', 'shop', 'related', 'detail'])->with([

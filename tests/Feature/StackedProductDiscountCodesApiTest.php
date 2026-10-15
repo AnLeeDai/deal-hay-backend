@@ -19,7 +19,13 @@ function stackedRewardCode(User $buyer, ShopProduct $product, string $type, int 
         'verification_reference' => (string) Str::uuid(), 'expires_at' => now()->addHour(),
     ]);
     $service = app(ProductDiscountCodeService::class);
-    $code = $service->issueFromCompletedView($buyer, $view);
+    $code = ProductDiscountCode::query()->create([
+        'user_id' => $buyer->getKey(), 'shop_product_id' => $product->getKey(), 'product_ad_view_id' => $view->getKey(),
+        'code' => Str::upper(Str::random(32)), 'reward_type' => $type, 'reward_value' => $value,
+        'original_price' => $type === 'percentage' ? 10000 : 1,
+        'sale_price' => $type === 'percentage' ? 10000 - $value : 1,
+        'expires_at' => now()->addDays(30),
+    ]);
 
     return $saved ? $service->save($buyer, $code) : $code;
 }

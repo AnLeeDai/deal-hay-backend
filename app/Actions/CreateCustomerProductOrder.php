@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Enums\UserRoleEnum;
 use App\Models\ProductAdView;
 use App\Models\ProductDiscountCode;
+use App\Models\RewardedTaskConversion;
 use App\Models\ShopOrder;
 use App\Models\ShopProduct;
 use App\Models\ShopProductVariant;
@@ -89,9 +90,15 @@ class CreateCustomerProductOrder
                     || $code->saved_at === null || $code->used_at !== null || $code->shop_order_id !== null || ! $code->expires_at->isFuture()) {
                     throw ValidationException::withMessages(['discount_code' => 'Mã giảm giá không hợp lệ, chưa lưu, đã hết hạn hoặc đã sử dụng.']);
                 }
-                $view = ProductAdView::query()->lockForUpdate()->find($code->product_ad_view_id);
-                if (! $view || $view->shop_order_id !== null || $view->completed_at === null
-                    || $view->user_id !== $customer->getKey() || $view->shop_product_id !== $product->getKey()) {
+                $view = $code->product_ad_view_id !== null
+                    ? ProductAdView::query()->lockForUpdate()->find($code->product_ad_view_id)
+                    : null;
+                $verifiedTaskReward = $code->product_ad_view_id === null && RewardedTaskConversion::query()
+                    ->where('product_discount_code_id', $code->getKey())
+                    ->whereHas('session', fn ($query) => $query->where('user_id', $customer->getKey())->where('shop_product_id', $product->getKey()))
+                    ->lockForUpdate()->first() !== null;
+                if (! $verifiedTaskReward && (! $view || $view->shop_order_id !== null || $view->completed_at === null
+                    || $view->user_id !== $customer->getKey() || $view->shop_product_id !== $product->getKey())) {
                     throw ValidationException::withMessages(['discount_code' => 'Ưu đãi của mã giảm giá đã được sử dụng hoặc không hợp lệ.']);
                 }
                 $contribution = min($remaining, $code->discountForOrder($regularPrice, $quantity));
@@ -129,7 +136,7 @@ class CreateCustomerProductOrder
             ]);
             $this->inventory->adjust($product, $variant, -$quantity, 'order_reserved', $customer, $order, "Giữ kho cho đơn {$order->order_number}.");
             foreach ($redeemed as $reward) {
-                $reward['view']->update(['shop_order_id' => $order->getKey()]);
+                $reward['view']?->update(['shop_order_id' => $order->getKey()]);
                 $reward['code']->update(['shop_order_id' => $order->getKey(), 'used_at' => now()]);
             }
 

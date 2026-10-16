@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AddressController;
+use App\Http\Controllers\AdGemPostbackController;
 use App\Http\Controllers\AdminProductCategoryController;
 use App\Http\Controllers\AdminShopController;
 use App\Http\Controllers\AdminTicketController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\ProductDiscountCodeController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicShopController;
 use App\Http\Controllers\RealtimeConfigController;
+use App\Http\Controllers\RewardedTaskController;
 use App\Http\Controllers\ShopController;
 use App\Http\Controllers\ShopCouponController;
 use App\Http\Controllers\ShopFollowController;
@@ -37,6 +39,10 @@ Route::get('/shops/{shop:user_code}', [PublicShopController::class, 'show'])->na
 Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}', [PublicShopController::class, 'showProduct'])
     ->scopeBindings()
     ->name('shops.products.show');
+Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}/rewarded-tasks', [RewardedTaskController::class, 'configuration'])
+    ->scopeBindings()->name('shops.products.rewarded-tasks.configuration');
+Route::post('/postbacks/adgem/v3', AdGemPostbackController::class)
+    ->name('postbacks.adgem.v3');
 
 Route::prefix('auth')->name('api.auth.')->group(function (): void {
     Route::post('/login', [UserController::class, 'signIn'])->middleware('throttle:6,1')->name('login');
@@ -55,6 +61,10 @@ Route::prefix('addresses')->name('addresses.')->group(function (): void {
 });
 
 Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
+    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/rewarded-tasks', [RewardedTaskController::class, 'store'])
+        ->scopeBindings()->middleware('throttle:6,1')->name('shops.products.rewarded-tasks.store');
+    Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}/rewarded-tasks/{rewardedTaskSession}', [RewardedTaskController::class, 'show'])
+        ->scopeBindings()->middleware('throttle:60,1')->name('shops.products.rewarded-tasks.show');
     Route::get('/auth/me', [UserController::class, 'me'])->name('api.auth.me');
     Route::post('/auth/logout', [UserController::class, 'logout'])->name('api.auth.logout');
     Route::get('/discount-codes', [ProductDiscountCodeController::class, 'index'])->name('discount-codes.index');

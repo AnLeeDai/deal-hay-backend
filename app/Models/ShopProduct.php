@@ -135,4 +135,9 @@ class ShopProduct extends Model
     {
         return $this->hasMany(ShopProductReview::class)->latest();
     }
+
+    public function rewardedTaskSessions(): HasMany
+    {
+        return $this->hasMany(RewardedTaskSession::class);
+    }
 }

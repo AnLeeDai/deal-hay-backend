@@ -69,40 +69,13 @@ Tin gửi có thể kèm `reply_to_id` của một tin trong cùng cuộc trò c
 
 Emoji là ký tự Unicode, hiển thị bằng bộ emoji của hệ điều hành. Frontend có bảng chọn nhanh và vẫn nhận emoji nhập từ bàn phím hệ thống: [Windows + .](https://support.microsoft.com/en-us/windows/keyboard-shortcuts-in-windows-dcc61a57-8ff0-cffe-9796-cb9706c75eec), [Control + Command + Space trên macOS](https://support.apple.com/en-us/102650), hoặc phím emoji trên điện thoại.
 
-## Nhiệm vụ nhận mã giảm giá 1.000đ
+## Quảng cáo Adsterra
 
-Mỗi mục tiêu được nhà cung cấp xác nhận là một chuyển đổi có trả tiền sẽ tạo một mã giảm cố định **1.000đ**, lưu sẵn vào ví của đúng người dùng và đúng sản phẩm, hết hạn sau 30 ngày. Số tiền là cấu hình phía server và được chốt khi mở phiên nhiệm vụ. Mã trừ 1.000đ trên đơn hàng, không nhân theo số lượng; tổng giảm không vượt giá trị đơn.
+Smartlink, Social Bar, Popunder và Native Banner được tích hợp ở frontend bằng mã Adsterra được cấp cho website. Backend không tạo phiên quảng cáo, xác nhận lượt xem hoặc phát coupon từ thao tác mở quảng cáo.
 
-Mặc định `REWARDED_TASK_PROVIDER=adsterra` và tính năng **chưa hoạt động**. Tài khoản Adsterra hiện chỉ có SmartLink/DirectLink và quảng cáo thông thường; chưa có tích hợp xác nhận hoàn thành nhiệm vụ cho từng người dùng. Mở liên kết, chờ đủ thời gian, quay lại trang hoặc gửi yêu cầu từ trình duyệt đều không tạo mã. Không dùng doanh thu thống kê tổng hợp để xác nhận người dùng đã hoàn thành nhiệm vụ.
+Đã gỡ adapter AdGem, các endpoint `rewarded-tasks` và `/api/postbacks/adgem/v3`, cùng cấu hình `REWARDED_TASK_*` và `ADGEM_*`. Các đường dẫn cũ trả 404; biến môi trường cũ không kích hoạt lại được hệ thống nhiệm vụ. Khi triển khai, khởi động lại API/worker để tải mã và route cache mới.
 
-Có sẵn adapter AdGem Web Offerwall tùy chọn để kết nối sau. Chỉ có App ID và Postback Key chưa đủ để đưa vào hoạt động: website phải được AdGem phê duyệt và cách hiển thị phần thưởng trên offerwall phải được thống nhất với cơ chế mỗi mục tiêu trả một coupon 1.000đ. Offerwall có cơ chế phần thưởng theo hệ số doanh thu; một hệ số chung không tự biểu diễn được phần thưởng cố định này cho mọi offer. Giữ `ADGEM_REWARD_MAPPING_CONFIRMED=false` cho tới khi điều kiện hiển thị và quy đổi thực sự được giải quyết với nhà cung cấp. Xem [Web Offerwall](https://docs.adgem.com/docs/integrate/offer-delivery/pre-built/web-offerwall), [cấu hình phần thưởng](https://docs.adgem.com/docs/configure/customization) và [postback v3](https://docs.adgem.com/docs/integrate/reward-mechanism/postbacks-v3).
-
-Cấu hình backend khi đã đủ điều kiện:
-
-```env
-REWARDED_TASK_PROVIDER=adgem
-REWARDED_TASK_COUPON_AMOUNT=1000
-ADGEM_ENABLED=true
-ADGEM_REWARD_MAPPING_CONFIRMED=true
-ADGEM_APP_ID=your_approved_numeric_property_id
-ADGEM_POSTBACK_KEY=your_server_only_postback_key
-ADGEM_POSTBACK_IPS=
-```
-
-Không đưa Postback Key vào biến `NEXT_PUBLIC_*`, frontend hoặc URL. Trong AdGem chọn **Server Postback v3 / POST** và URL HTTPS `<BACKEND_ORIGIN>/api/postbacks/adgem/v3`. Đặt `ADGEM_POSTBACK_IPS` bằng danh sách IP sản xuất do AdGem hỗ trợ cung cấp nếu áp dụng IP allowlist. Backend kiểm tra header `Signature` bằng HMAC-SHA256 trên nguyên body, sau đó kiểm tra `data.app_id`, `player_id`, `c1` và `c2`. URL offerwall được server tạo với player ID ổn định cho mỗi tài khoản; không thay player ID bằng mã phiên. Các custom parameter phải được trả nguyên vẹn qua postback.
-
-Chạy `php artisan migrate --force` và tạo lại config cache khi triển khai. API cung cấp:
-
-| Endpoint | Quyền | Kết quả |
-| --- | --- | --- |
-| `GET /api/shops/{shopCode}/products/{slug}/rewarded-tasks` | Công khai, sản phẩm đang bán | `enabled`, `provider`, `reward_amount`, `reason` nếu chưa hoạt động |
-| `POST` cùng đường dẫn | Đăng nhập | `task`: `id`, `status`, `reward_amount`, `expires_at`, `offerwall_url`, `discount_codes` |
-| `GET .../rewarded-tasks/{taskId}` | Chính người mở phiên, đúng sản phẩm | Trạng thái và danh sách mã đã được xác nhận |
-| `POST /api/postbacks/adgem/v3` | Chữ ký nhà cung cấp | Chỉ phát mã cho `conversion_type=reward`, `payout` và `amount` dương ở độ chính xác sổ ghi nhận |
-
-Một phiên có thể nhận nhiều mã từ các mục tiêu trả thưởng khác nhau. Unique key gồm nhà cung cấp, app, conversion ID và goal ID chống phát trùng, kể cả khi gửi lại postback bằng request ID mới. Request ID đã dùng cho chuyển đổi khác bị từ chối. Chuyển đổi không được gán lại sang phiên/người dùng/sản phẩm khác. Phiên có thời hạn mở offerwall 90 ngày; xác nhận có chữ ký đến muộn vẫn được xử lý để hỗ trợ nhiệm vụ dài ngày, và mã mới có hạn 30 ngày kể từ lúc được cấp. Các endpoint hoàn thành quảng cáo cũ vẫn trả 404.
-
-`payout` trong sổ ghi nhận là doanh thu nhà cung cấp báo tại thời điểm chuyển đổi, không phải tiền đã thanh toán và không bảo đảm lãi sau khi trừ coupon. Adapter không tự xử lý việc thu hồi thưởng hoặc khóa người dùng từ webhook của nhà cung cấp; callback install/0/âm không phát mã. Đối soát và giải quyết chargeback theo hợp đồng nhà cung cấp trước khi vận hành thực tế.
+Giữ nguyên các bảng lịch sử quảng cáo và chuyển đổi để mã giảm giá đã lưu còn được kiểm tra và sử dụng theo điều kiện ban đầu. Không có migration xóa dữ liệu hoặc tạo phần thưởng quảng cáo mới.
 
 ## Docker
 

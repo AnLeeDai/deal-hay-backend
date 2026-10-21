@@ -21,14 +21,20 @@ class ShippingRewardService
             && $product->shop_owner_id === $shop->getKey() && $product->is_active, 404);
     }
 
-    /** @return array{available:bool,unavailable_reason:string|null} */
+    /** @return array{available:bool,unavailable_reason:string|null,rewarded_ad_unit_path:string|null} */
     public function offer(User $shop, ShopProduct $product): array
     {
         $this->assertPublicProduct($shop, $product);
+        $adUnitPath = $this->rewardedAdUnitPath();
         $reason = ! config('shipping_rewards.enabled') ? 'promotion_disabled'
-            : (! $this->shipping->settings($shop)['enabled'] ? 'shipping_not_configured' : null);
+            : ($adUnitPath === null ? 'rewarded_ads_not_configured'
+                : (! $this->shipping->settings($shop)['enabled'] ? 'shipping_not_configured' : null));
 
-        return ['available' => $reason === null, 'unavailable_reason' => $reason];
+        return [
+            'available' => $reason === null,
+            'unavailable_reason' => $reason,
+            'rewarded_ad_unit_path' => $reason === null ? $adUnitPath : null,
+        ];
     }
 
     public function start(User $customer, User $shop, ShopProduct $product): ShippingRewardView
@@ -40,6 +46,8 @@ class ShippingRewardService
             return ShippingRewardView::query()->create([
                 'user_id' => $customer->getKey(),
                 'shop_product_id' => $product->getKey(),
+                'reward_provider' => 'google_ad_manager',
+                'rewarded_ad_unit_path' => $this->rewardedAdUnitPath(),
                 'expires_at' => now()->addMinutes(max(1, min(1440, (int) config('shipping_rewards.session_minutes', 15)))),
             ]);
         }, attempts: 5);
@@ -58,6 +66,10 @@ class ShippingRewardService
             }
 
             $this->assertAvailable($shop, $product);
+            if ($view->reward_provider !== 'google_ad_manager' || $view->rewarded_ad_unit_path !== $this->rewardedAdUnitPath()) {
+                throw ValidationException::withMessages(['shipping_offer' => 'Cấu hình quảng cáo đã thay đổi. Vui lòng mở lại ưu đãi vận chuyển.']);
+            }
+
             if (! $view->expires_at->isFuture()) {
                 throw ValidationException::withMessages(['shipping_offer' => 'Phiên nhận ưu đãi đã hết hạn. Vui lòng mở lại ưu đãi vận chuyển.']);
             }
@@ -110,5 +122,13 @@ class ShippingRewardService
         if (! $this->offer($shop, $product)['available']) {
             throw ValidationException::withMessages(['shipping_offer' => 'Ưu đãi miễn phí vận chuyển hiện chưa khả dụng.']);
         }
+    }
+
+    private function rewardedAdUnitPath(): ?string
+    {
+        $path = config('shipping_rewards.google_ad_unit_path');
+
+        return is_string($path) && strlen($path) <= 255 && preg_match('~^/[0-9]+/[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*$~D', $path) === 1
+            ? $path : null;
     }
 }

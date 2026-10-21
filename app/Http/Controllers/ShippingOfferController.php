@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\RedeemShippingRewardRequest;
 use App\Http\Requests\ShippingOfferRequest;
 use App\Models\ShippingRewardView;
 use App\Models\ShopProduct;
@@ -28,10 +29,14 @@ class ShippingOfferController extends Controller
     {
         $view = $rewards->start($request->user(), $shop, $shopProduct);
 
-        return response()->json(['view' => ['id' => $view->getKey(), 'expires_at' => $view->expires_at->toISOString()]], 201);
+        return response()->json(['view' => [
+            'id' => $view->getKey(),
+            'expires_at' => $view->expires_at->toISOString(),
+            'rewarded_ad_unit_path' => $view->rewarded_ad_unit_path,
+        ]], 201);
     }
 
-    public function redeem(ShippingOfferRequest $request, User $shop, ShopProduct $shopProduct, ShippingRewardView $shippingRewardView, ShippingRewardService $rewards): JsonResponse
+    public function redeem(RedeemShippingRewardRequest $request, User $shop, ShopProduct $shopProduct, ShippingRewardView $shippingRewardView, ShippingRewardService $rewards): JsonResponse
     {
         $code = $rewards->redeem($request->user(), $shop, $shopProduct, $shippingRewardView);
 

@@ -22,6 +22,8 @@ class ShippingRewardViewFactory extends Factory
         return [
             'user_id' => User::factory()->customer(),
             'shop_product_id' => ShopProduct::factory(),
+            'reward_provider' => 'google_ad_manager',
+            'rewarded_ad_unit_path' => config('shipping_rewards.google_ad_unit_path'),
             'expires_at' => now()->addMinutes(15),
         ];
     }

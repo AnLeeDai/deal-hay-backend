@@ -12,6 +12,7 @@ use Laravel\Sanctum\Sanctum;
 
 beforeEach(function (): void {
     config()->set('shipping_rewards.enabled', true);
+    config()->set('shipping_rewards.google_ad_unit_path', '/1234567/deal_hay_shipping_reward');
 });
 
 function shippingRewardProduct(array $settings = []): ShopProduct
@@ -41,7 +42,7 @@ it('returns an unavailable offer and 422 without minting when promotion or shipp
     Sanctum::actingAs(User::factory()->customer()->create());
 
     $this->getJson(shippingRewardUrl($product).'/shipping-offer')->assertOk()->assertExactJson([
-        'shipping_offer' => ['available' => false, 'unavailable_reason' => $reason],
+        'shipping_offer' => ['available' => false, 'unavailable_reason' => $reason, 'rewarded_ad_unit_path' => null],
     ]);
     $this->postJson(shippingRewardUrl($product).'/shipping-offer/views')->assertUnprocessable()
         ->assertJsonValidationErrors('shipping_offer');
@@ -53,16 +54,41 @@ it('returns an unavailable offer and 422 without minting when promotion or shipp
     'shipping disabled' => [true, false, 'shipping_not_configured'],
 ]);
 
+it('returns an unavailable offer and 422 without starting sessions when the rewarded unit is missing or invalid', function (mixed $path): void {
+    config()->set('shipping_rewards.google_ad_unit_path', $path);
+    $product = shippingRewardProduct();
+    Sanctum::actingAs(User::factory()->customer()->create());
+    $base = shippingRewardUrl($product).'/shipping-offer';
+
+    $this->getJson($base)->assertOk()->assertExactJson([
+        'shipping_offer' => [
+            'available' => false, 'unavailable_reason' => 'rewarded_ads_not_configured', 'rewarded_ad_unit_path' => null,
+        ],
+    ]);
+    $this->postJson($base.'/views')->assertUnprocessable()->assertJsonValidationErrors('shipping_offer');
+
+    $this->assertDatabaseCount('shipping_reward_views', 0);
+    $this->assertDatabaseCount('shipping_discount_codes', 0);
+})->with([
+    'missing' => null,
+    'empty' => '',
+    'adsense publisher id' => 'ca-pub-7303400269186048',
+    'missing unit' => '/1234567/',
+    'script' => '/1234567/<script>',
+    'query' => '/1234567/rewarded?test=true',
+    'oversized' => '/1234567/'.str_repeat('a', 250),
+]);
+
 it('publishes an available offer and requires authentication for starting redeeming and retrieving codes', function (): void {
     $product = shippingRewardProduct();
     $view = ShippingRewardView::factory()->create(['shop_product_id' => $product->id]);
     $base = shippingRewardUrl($product).'/shipping-offer';
 
     $this->getJson($base)->assertOk()->assertExactJson([
-        'shipping_offer' => ['available' => true, 'unavailable_reason' => null],
+        'shipping_offer' => ['available' => true, 'unavailable_reason' => null, 'rewarded_ad_unit_path' => '/1234567/deal_hay_shipping_reward'],
     ]);
     $this->postJson($base.'/views')->assertUnauthorized();
-    $this->postJson($base.'/views/'.$view->id.'/redeem')->assertUnauthorized();
+    $this->postJson($base.'/views/'.$view->id.'/redeem', ['rewarded_slot_granted' => true])->assertUnauthorized();
     $this->getJson($base.'/code')->assertUnauthorized();
 
     $this->assertDatabaseCount('shipping_discount_codes', 0);
@@ -97,11 +123,14 @@ it('starts an opaque expiring session without granting a coupon or accepting cli
     $response = $this->postJson(shippingRewardUrl($product).'/shipping-offer/views', [
         'user_id' => $product->shop_owner_id, 'completed' => true, 'verified_at' => now()->toISOString(),
         'shipping_discount_code_id' => Str::uuid(),
-    ])->assertCreated()->assertJsonPath('view.expires_at', now()->addMinutes(15)->startOfSecond()->toISOString());
+        'reward_provider' => 'client_provider', 'rewarded_ad_unit_path' => '/1234567/client_unit',
+    ])->assertCreated()->assertJsonPath('view.expires_at', now()->addMinutes(15)->startOfSecond()->toISOString())
+        ->assertJsonPath('view.rewarded_ad_unit_path', '/1234567/deal_hay_shipping_reward');
 
     $this->assertDatabaseHas('shipping_reward_views', [
         'id' => $response->json('view.id'), 'user_id' => $buyer->id,
         'shop_product_id' => $product->id, 'redeemed_at' => null, 'shipping_discount_code_id' => null,
+        'reward_provider' => 'google_ad_manager', 'rewarded_ad_unit_path' => '/1234567/deal_hay_shipping_reward',
     ]);
     $this->assertDatabaseCount('shipping_discount_codes', 0);
     $this->assertDatabaseCount('product_ad_views', 0);
@@ -117,22 +146,75 @@ it('redeems once per session and reuses the current product coupon across new se
     $base = shippingRewardUrl($product).'/shipping-offer';
     Sanctum::actingAs($buyer);
 
-    $response = $this->postJson($base.'/views/'.$first->id.'/redeem')->assertOk()
+    $response = $this->postJson($base.'/views/'.$first->id.'/redeem', ['rewarded_slot_granted' => true])->assertOk()
         ->assertJsonPath('shipping_discount_code.is_available', true)
         ->assertJsonPath('shipping_discount_code.discount_percent', 100)
         ->assertJsonPath('shipping_discount_code.product_id', $product->id)
         ->assertJsonPath('shipping_discount_code.expires_at', now()->addDays(7)->startOfSecond()->toISOString());
     $codeId = $response->json('shipping_discount_code.id');
-    $this->postJson($base.'/views/'.$first->id.'/redeem')->assertOk()->assertJsonPath('shipping_discount_code.id', $codeId);
-    $this->postJson($base.'/views/'.$second->id.'/redeem')->assertOk()->assertJsonPath('shipping_discount_code.id', $codeId);
+    $this->postJson($base.'/views/'.$first->id.'/redeem', ['rewarded_slot_granted' => true])->assertOk()->assertJsonPath('shipping_discount_code.id', $codeId);
+    $this->postJson($base.'/views/'.$second->id.'/redeem', ['rewarded_slot_granted' => true])->assertOk()->assertJsonPath('shipping_discount_code.id', $codeId);
     $this->getJson($base.'/code')->assertOk()->assertJsonPath('shipping_discount_code.id', $codeId);
     $this->travel(16)->minutes();
-    $this->postJson($base.'/views/'.$first->id.'/redeem')->assertOk()->assertJsonPath('shipping_discount_code.id', $codeId);
+    $this->postJson($base.'/views/'.$first->id.'/redeem', ['rewarded_slot_granted' => true])->assertOk()->assertJsonPath('shipping_discount_code.id', $codeId);
 
     $this->assertDatabaseCount('shipping_discount_codes', 1);
     $this->assertDatabaseHas('shipping_reward_views', ['id' => $first->id, 'shipping_discount_code_id' => $codeId]);
     $this->assertDatabaseHas('shipping_reward_views', ['id' => $second->id, 'shipping_discount_code_id' => $codeId]);
     $this->assertDatabaseCount('product_ad_views', 0);
+});
+
+it('returns 422 without granting a coupon unless the browser reports a rewarded grant', function (array $payload): void {
+    $product = shippingRewardProduct();
+    $buyer = User::factory()->customer()->create();
+    $view = ShippingRewardView::factory()->create(['user_id' => $buyer->id, 'shop_product_id' => $product->id]);
+    Sanctum::actingAs($buyer);
+
+    $this->postJson(shippingRewardUrl($product).'/shipping-offer/views/'.$view->id.'/redeem', $payload)
+        ->assertUnprocessable()->assertJsonValidationErrors('rewarded_slot_granted')
+        ->assertJsonPath('errors.rewarded_slot_granted.0', 'Quảng cáo chưa cấp phần thưởng. Vui lòng hoàn thành quảng cáo để nhận mã miễn phí vận chuyển.');
+
+    $this->assertDatabaseCount('shipping_discount_codes', 0);
+    expect($view->fresh()->redeemed_at)->toBeNull();
+})->with([
+    'missing grant' => [[]],
+    'closed before grant' => [['rewarded_slot_granted' => false]],
+    'string grant' => [['rewarded_slot_granted' => 'true']],
+    'numeric grant' => [['rewarded_slot_granted' => 1]],
+    'unrelated completion fields' => [['completed' => true, 'verified_at' => '2026-10-22T00:00:00Z']],
+]);
+
+it('returns 422 without granting for a legacy session or a changed rewarded provider or unit', function (?string $provider, ?string $unit): void {
+    $product = shippingRewardProduct();
+    $buyer = User::factory()->customer()->create();
+    $view = ShippingRewardView::factory()->create([
+        'user_id' => $buyer->id, 'shop_product_id' => $product->id,
+        'reward_provider' => $provider, 'rewarded_ad_unit_path' => $unit,
+    ]);
+    Sanctum::actingAs($buyer);
+
+    $this->postJson(shippingRewardUrl($product).'/shipping-offer/views/'.$view->id.'/redeem', ['rewarded_slot_granted' => true])
+        ->assertUnprocessable()->assertJsonValidationErrors('shipping_offer');
+
+    $this->assertDatabaseCount('shipping_discount_codes', 0);
+    expect($view->fresh()->redeemed_at)->toBeNull();
+})->with([
+    'legacy session' => [null, null],
+    'another provider' => ['old_provider', '/1234567/deal_hay_shipping_reward'],
+    'changed unit' => ['google_ad_manager', '/1234567/old_shipping_reward'],
+]);
+
+it('returns 422 without granting when the rewarded unit is removed during a session', function (): void {
+    $product = shippingRewardProduct();
+    $buyer = User::factory()->customer()->create();
+    $view = ShippingRewardView::factory()->create(['user_id' => $buyer->id, 'shop_product_id' => $product->id]);
+    config()->set('shipping_rewards.google_ad_unit_path', '');
+    Sanctum::actingAs($buyer);
+
+    $this->postJson(shippingRewardUrl($product).'/shipping-offer/views/'.$view->id.'/redeem', ['rewarded_slot_granted' => true])
+        ->assertUnprocessable()->assertJsonValidationErrors('shipping_offer');
+
+    $this->assertDatabaseCount('shipping_discount_codes', 0);
 });
 
 it('returns 404 when redeeming another users session or a session on another product', function (bool $wrongUser): void {
@@ -144,7 +226,7 @@ it('returns 404 when redeeming another users session or a session on another pro
     ]);
     Sanctum::actingAs($buyer);
 
-    $this->postJson(shippingRewardUrl($product).'/shipping-offer/views/'.$view->id.'/redeem')->assertNotFound();
+    $this->postJson(shippingRewardUrl($product).'/shipping-offer/views/'.$view->id.'/redeem', ['rewarded_slot_granted' => true])->assertNotFound();
 
     $this->assertDatabaseCount('shipping_discount_codes', 0);
     expect($view->fresh()->redeemed_at)->toBeNull();
@@ -161,7 +243,7 @@ it('returns 422 without granting for an expired session or a newly disabled offe
     config()->set('shipping_rewards.enabled', $expired);
     Sanctum::actingAs($buyer);
 
-    $this->postJson(shippingRewardUrl($product).'/shipping-offer/views/'.$view->id.'/redeem')
+    $this->postJson(shippingRewardUrl($product).'/shipping-offer/views/'.$view->id.'/redeem', ['rewarded_slot_granted' => true])
         ->assertUnprocessable()->assertJsonValidationErrors('shipping_offer');
 
     $this->assertDatabaseCount('shipping_discount_codes', 0);
@@ -305,7 +387,7 @@ it('applies configured session and coupon expiration periods', function (): void
     $base = shippingRewardUrl($product).'/shipping-offer/views';
 
     $response = $this->postJson($base)->assertCreated()->assertJsonPath('view.expires_at', now()->addMinutes(5)->startOfSecond()->toISOString());
-    $this->postJson($base.'/'.$response->json('view.id').'/redeem')->assertOk()
+    $this->postJson($base.'/'.$response->json('view.id').'/redeem', ['rewarded_slot_granted' => true])->assertOk()
         ->assertJsonPath('shipping_discount_code.expires_at', now()->addDays(2)->startOfSecond()->toISOString());
 
     $this->assertDatabaseCount('shipping_discount_codes', 1);

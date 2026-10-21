@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['user_id', 'shop_product_id', 'expires_at', 'redeemed_at', 'shipping_discount_code_id'])]
+#[Fillable(['user_id', 'shop_product_id', 'reward_provider', 'rewarded_ad_unit_path', 'expires_at', 'redeemed_at', 'shipping_discount_code_id'])]
 class ShippingRewardView extends Model
 {
     /** @use HasFactory<ShippingRewardViewFactory> */

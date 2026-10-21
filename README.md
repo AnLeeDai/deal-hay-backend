@@ -69,9 +69,9 @@ Tin gửi có thể kèm `reply_to_id` của một tin trong cùng cuộc trò c
 
 Emoji là ký tự Unicode, hiển thị bằng bộ emoji của hệ điều hành. Frontend có bảng chọn nhanh và vẫn nhận emoji nhập từ bàn phím hệ thống: [Windows + .](https://support.microsoft.com/en-us/windows/keyboard-shortcuts-in-windows-dcc61a57-8ff0-cffe-9796-cb9706c75eec), [Control + Command + Space trên macOS](https://support.apple.com/en-us/102650), hoặc phím emoji trên điện thoại.
 
-## Quảng cáo Adsterra
+## Quảng cáo Google
 
-Social Bar, Popunder và Native Banner được tích hợp ở frontend bằng mã Adsterra được cấp cho website. Adsterra không cung cấp xác nhận xem có thưởng trong tích hợp này. Backend không xác nhận lượt xem quảng cáo, lượt nhấp vào quảng cáo đối tác hoặc doanh thu.
+Frontend dùng Google AdSense với publisher ID được cấp và Google Ad Manager Rewarded Ads cho ưu đãi vận chuyển. Script AdSense, metadata xác minh và `ads.txt` thuộc frontend; backend quản lý ad unit path, phiên nhận thưởng và mã vận chuyển. Backend không xác minh doanh thu hoặc lượt nhấp quảng cáo. Tích hợp Adsterra trước đây đã được gỡ khỏi frontend.
 
 Đã gỡ adapter AdGem, các endpoint `rewarded-tasks` và `/api/postbacks/adgem/v3`, cùng cấu hình `REWARDED_TASK_*` và `ADGEM_*`. Các đường dẫn cũ trả 404; biến môi trường cũ không kích hoạt lại được hệ thống nhiệm vụ. Khi triển khai, khởi động lại API/worker để tải mã và route cache mới.
 
@@ -89,9 +89,13 @@ Checkout yêu cầu `quoted_shipping_fee` khớp phí hiện tại khi có báo 
 
 ### Ưu đãi mã miễn phí vận chuyển
 
-Chạy `php artisan migrate --force` để thêm `shipping_reward_views` và `shipping_discount_codes`. Luồng này mặc định **tắt** (`SHIPPING_REWARDS_ENABLED=false`); đặt `SHIPPING_REWARDS_ENABLED=true` và nạp lại cấu hình để bật. Adsterra hạn chế lưu lượng được khuyến khích bằng phần thưởng, nên cần đối chiếu thỏa thuận với nhà cung cấp trước khi vận hành. Cờ này chỉ bật chương trình nội bộ của website.
+Chạy `php artisan migrate --force` để thêm bảng mã vận chuyển và thông tin nhà cung cấp quảng cáo vào `shipping_reward_views`. Luồng dùng **Google Ad Manager Rewarded Ads**, mặc định **tắt** (`SHIPPING_REWARDS_ENABLED=false`). Tạo ad unit dành cho rewarded web trong tài khoản Ad Manager đã được duyệt, đặt `GOOGLE_AD_MANAGER_REWARDED_AD_UNIT_PATH` bằng đường dẫn đầy đủ như `/NETWORK_CODE/AD_UNIT_CODE`, sau đó đặt `SHIPPING_REWARDS_ENABLED=true` và nạp lại cấu hình. Mã publisher AdSense `ca-pub-…`, snippet AdSense và dòng `ads.txt` không thay thế được đường dẫn ad unit này; không dùng ad unit mẫu của Google để phát mã thật.
 
-Khi bật và shop đã cấu hình vận chuyển, `GET /api/shops/{shopCode}/products/{slug}/shipping-offer` trả khả dụng. `POST .../shipping-offer/views` yêu cầu đăng nhập, tạo phiên 15 phút nhưng chưa phát mã. Nút **Xem** của Deal Hay gọi `POST .../shipping-offer/views/{id}/redeem` để nhận mã nội bộ; đây là hành động nhận ưu đãi của ứng dụng, không phải xác nhận đã xem hoặc nhấp quảng cáo Adsterra. Không gắn phát mã vào lượt nhấp liên kết do mạng quảng cáo tạo.
+Khi bật, có đường dẫn ad unit hợp lệ và shop đã cấu hình vận chuyển, `GET /api/shops/{shopCode}/products/{slug}/shipping-offer` trả `available: true` cùng `rewarded_ad_unit_path`. Khi không khả dụng, đường dẫn trả `null`; cấu hình quảng cáo thiếu/sai có lý do `rewarded_ads_not_configured`. `POST .../shipping-offer/views` yêu cầu đăng nhập, tạo phiên 15 phút gắn với người dùng, sản phẩm, nhà cung cấp và ad unit hiện tại, chưa phát mã. Phiên cũ chưa có nhà cung cấp hoặc có ad unit khác cấu hình hiện tại không được nhận mã mới.
+
+Frontend xin người dùng đồng ý xem quảng cáo và chỉ gọi `POST .../shipping-offer/views/{id}/redeem` với JSON `{"rewarded_slot_granted": true}` sau sự kiện GPT `rewardedSlotGranted` của đúng slot. Thiếu cờ, cờ khác boolean `true`, đóng quảng cáo trước khi nhận thưởng, không có quảng cáo hoặc lỗi tải đều không phát mã. Xem xong video hoặc nhấp quảng cáo không tự được coi là nhận thưởng; khách luôn có thể bỏ qua và đặt hàng với phí vận chuyển bình thường.
+
+**Giới hạn xác thực:** GPT rewarded web báo sự kiện trong trình duyệt, không cung cấp chứng cứ server có chữ ký qua luồng tích hợp này. `rewarded_slot_granted` là khai báo từ client có thể bị giả mạo, không phải SSV hay xác minh do Google gửi về backend. Kiểm tra phiên/người dùng/sản phẩm/hạn và giới hạn request giúp bảo vệ luồng ứng dụng nhưng không chứng minh lượt xem ở phía Google. Nếu cần chống giả mạo bằng callback có chữ ký, phải dùng giải pháp có hỗ trợ xác minh server cho web trước khi cấp ưu đãi có giá trị. Tham khảo [mẫu GPT rewarded](https://developers.google.com/publisher-tag/samples/display-rewarded-ad), [sự kiện GPT](https://developers.google.com/publisher-tag/reference#googletag.events.RewardedSlotGrantedEvent) và [chính sách phần thưởng](https://support.google.com/admanager/answer/7496282).
 
 Mỗi người dùng chỉ giữ một mã chưa dùng còn hạn cho một sản phẩm; gọi lại cùng phiên hoặc phiên khác trả lại mã đó. `GET .../shipping-offer/code` yêu cầu đăng nhập và trả mã hiện tại để tiếp tục sau khi tải lại trang. Thời hạn mặc định 7 ngày, cấu hình bằng `SHIPPING_REWARDS_COUPON_DAYS`; thời hạn phiên bằng `SHIPPING_REWARDS_SESSION_MINUTES`.
 

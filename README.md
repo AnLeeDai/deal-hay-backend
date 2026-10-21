@@ -71,7 +71,7 @@ Emoji là ký tự Unicode, hiển thị bằng bộ emoji của hệ điều h�
 
 ## Quảng cáo Adsterra
 
-Smartlink, Social Bar, Popunder và Native Banner được tích hợp ở frontend bằng mã Adsterra được cấp cho website. Backend không tạo phiên quảng cáo, xác nhận lượt xem hoặc phát coupon từ thao tác mở quảng cáo.
+Social Bar, Popunder và Native Banner được tích hợp ở frontend bằng mã Adsterra được cấp cho website. Backend không tạo phiên quảng cáo, xác nhận lượt xem hoặc phát coupon từ thao tác mở quảng cáo.
 
 Đã gỡ adapter AdGem, các endpoint `rewarded-tasks` và `/api/postbacks/adgem/v3`, cùng cấu hình `REWARDED_TASK_*` và `ADGEM_*`. Các đường dẫn cũ trả 404; biến môi trường cũ không kích hoạt lại được hệ thống nhiệm vụ. Khi triển khai, khởi động lại API/worker để tải mã và route cache mới.
 

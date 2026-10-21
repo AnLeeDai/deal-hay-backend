@@ -140,4 +140,9 @@ class ShopProduct extends Model
     {
         return $this->hasMany(RewardedTaskSession::class);
     }
+
+    public function shippingRewardViews(): HasMany
+    {
+        return $this->hasMany(ShippingRewardView::class);
+    }
 }

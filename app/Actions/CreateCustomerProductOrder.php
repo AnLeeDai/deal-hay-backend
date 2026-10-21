@@ -6,11 +6,13 @@ use App\Enums\UserRoleEnum;
 use App\Models\ProductAdView;
 use App\Models\ProductDiscountCode;
 use App\Models\RewardedTaskConversion;
+use App\Models\ShippingDiscountCode;
 use App\Models\ShopOrder;
 use App\Models\ShopProduct;
 use App\Models\ShopProductVariant;
 use App\Models\User;
 use App\Services\AddressService;
+use App\Services\ShopShippingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -18,7 +20,11 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class CreateCustomerProductOrder
 {
-    public function __construct(private readonly SyncShopProductInventory $inventory, private readonly AddressService $addresses) {}
+    public function __construct(
+        private readonly SyncShopProductInventory $inventory,
+        private readonly AddressService $addresses,
+        private readonly ShopShippingService $shipping,
+    ) {}
 
     /** @param array<string, mixed> $data */
     public function handle(User $customer, User $shop, ShopProduct $product, array $data): ShopOrder
@@ -39,6 +45,12 @@ class CreateCustomerProductOrder
         if (filled($data['discount_codes'] ?? null)) {
             $fingerprintData[] = $data['discount_codes'];
         }
+        if (isset($data['quoted_shipping_fee'])) {
+            $fingerprintData['quoted_shipping_fee'] = (int) $data['quoted_shipping_fee'];
+        }
+        if (filled($data['shipping_discount_code'] ?? null)) {
+            $fingerprintData['shipping_discount_code'] = $data['shipping_discount_code'];
+        }
         $fingerprint = hash('sha256', json_encode($fingerprintData, JSON_THROW_ON_ERROR));
 
         return DB::transaction(function () use ($customer, $shop, $product, $data, $fingerprint): ShopOrder {
@@ -58,6 +70,12 @@ class CreateCustomerProductOrder
             }
 
             abort_unless($product->is_active, 404);
+            $shippingQuote = $this->shipping->quote($shop, (int) $data['shipping_province_code'], (int) $data['shipping_ward_code']);
+            $shippingFee = $shippingQuote['fee'] ?? 0;
+            if (($shippingQuote['fee'] !== null && ! isset($data['quoted_shipping_fee']))
+                || (isset($data['quoted_shipping_fee']) && (int) $data['quoted_shipping_fee'] !== $shippingFee)) {
+                throw ValidationException::withMessages(['quoted_shipping_fee' => 'Phí vận chuyển đã thay đổi. Vui lòng kiểm tra phí mới trước khi đặt hàng.']);
+            }
             $variant = filled($data['variant_id'] ?? null)
                 ? ShopProductVariant::query()->where('shop_product_id', $product->getKey())
                     ->where('is_active', true)->whereNull('retired_at')->lockForUpdate()->find($data['variant_id'])
@@ -109,6 +127,23 @@ class CreateCustomerProductOrder
             }
 
             $discount = $subtotal - $remaining;
+            $shippingCode = null;
+            $shippingDiscount = 0;
+            if (filled($data['shipping_discount_code'] ?? null)) {
+                $shippingCode = ShippingDiscountCode::query()->where('code', $data['shipping_discount_code'])->lockForUpdate()->first();
+                if (! $shippingCode || $shippingCode->user_id !== $customer->getKey()
+                    || $shippingCode->shop_product_id !== $product->getKey() || ! $shippingCode->isAvailable()) {
+                    throw ValidationException::withMessages(['shipping_discount_code' => 'Mã miễn phí vận chuyển không hợp lệ, đã hết hạn hoặc đã sử dụng.']);
+                }
+                if ($shippingQuote['fee'] === null || $shippingFee <= 0) {
+                    throw ValidationException::withMessages(['shipping_discount_code' => 'Mã chỉ áp dụng khi có phí vận chuyển Hà Nội lớn hơn 0.']);
+                }
+                $shippingDiscount = $shippingFee;
+            }
+            $shippingTotal = $shippingFee - $shippingDiscount;
+            if ($remaining > 4294967295 - $shippingTotal) {
+                throw ValidationException::withMessages(['quantity' => 'Tổng giá trị đơn hàng gồm phí vận chuyển vượt quá giới hạn cho phép. Vui lòng giảm số lượng.']);
+            }
             $order = ShopOrder::query()->create([
                 'shop_owner_id' => $shop->getKey(),
                 'customer_id' => $customer->getKey(),
@@ -119,9 +154,14 @@ class CreateCustomerProductOrder
                 'customer_email' => $customer->email,
                 'customer_phone' => $data['customer_phone'],
                 'shipping_address' => $this->addresses->formatShippingAddress($data['shipping_address'], (int) $data['shipping_province_code'], (int) $data['shipping_ward_code']),
+                'shipping_province_code' => (int) $data['shipping_province_code'],
+                'shipping_ward_code' => (int) $data['shipping_ward_code'],
+                'shipping_fee' => $shippingFee,
+                'shipping_discount_amount' => $shippingDiscount,
+                'shipping_total' => $shippingTotal,
                 'subtotal' => $subtotal,
                 'discount_amount' => $discount,
-                'total' => $subtotal - $discount,
+                'total' => $remaining + $shippingTotal,
                 'note' => $data['note'] ?? null,
             ]);
             $order->items()->create([
@@ -139,6 +179,7 @@ class CreateCustomerProductOrder
                 $reward['view']?->update(['shop_order_id' => $order->getKey()]);
                 $reward['code']->update(['shop_order_id' => $order->getKey(), 'used_at' => now()]);
             }
+            $shippingCode?->update(['shop_order_id' => $order->getKey(), 'used_at' => now()]);
 
             return $order;
         }, attempts: 5);

@@ -16,6 +16,8 @@ use App\Http\Controllers\ProductDiscountCodeController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicShopController;
 use App\Http\Controllers\RealtimeConfigController;
+use App\Http\Controllers\ShippingOfferController;
+use App\Http\Controllers\ShippingQuoteController;
 use App\Http\Controllers\ShopController;
 use App\Http\Controllers\ShopCouponController;
 use App\Http\Controllers\ShopFollowController;
@@ -24,6 +26,7 @@ use App\Http\Controllers\ShopOrderController;
 use App\Http\Controllers\ShopProductPricingController;
 use App\Http\Controllers\ShopProductReviewController;
 use App\Http\Controllers\ShopReactionController;
+use App\Http\Controllers\ShopShippingSettingController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -37,6 +40,10 @@ Route::get('/shops/{shop:user_code}', [PublicShopController::class, 'show'])->na
 Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}', [PublicShopController::class, 'showProduct'])
     ->scopeBindings()
     ->name('shops.products.show');
+Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-quote', ShippingQuoteController::class)
+    ->scopeBindings()->middleware('throttle:60,1')->name('shops.products.shipping-quote');
+Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-offer', [ShippingOfferController::class, 'show'])
+    ->scopeBindings()->middleware('throttle:60,1')->name('shops.products.shipping-offer.show');
 
 Route::prefix('auth')->name('api.auth.')->group(function (): void {
     Route::post('/login', [UserController::class, 'signIn'])->middleware('throttle:6,1')->name('login');
@@ -55,6 +62,14 @@ Route::prefix('addresses')->name('addresses.')->group(function (): void {
 });
 
 Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
+    Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-offer/code', [ShippingOfferController::class, 'code'])
+        ->scopeBindings()->middleware('throttle:60,1')->name('shops.products.shipping-offer.code');
+    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-offer/views', [ShippingOfferController::class, 'start'])
+        ->scopeBindings()->middleware('throttle:30,1')->name('shops.products.shipping-offer.start');
+    Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-offer/views/{shippingRewardView}/redeem', [ShippingOfferController::class, 'redeem'])
+        ->scopeBindings()->middleware('throttle:30,1')->name('shops.products.shipping-offer.redeem');
+    Route::get('/shop/shipping-settings', [ShopShippingSettingController::class, 'show'])->name('shop.shipping-settings.show');
+    Route::put('/shop/shipping-settings', [ShopShippingSettingController::class, 'update'])->name('shop.shipping-settings.update');
     Route::get('/auth/me', [UserController::class, 'me'])->name('api.auth.me');
     Route::post('/auth/logout', [UserController::class, 'logout'])->name('api.auth.logout');
     Route::get('/discount-codes', [ProductDiscountCodeController::class, 'index'])->name('discount-codes.index');

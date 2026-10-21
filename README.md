@@ -71,11 +71,31 @@ Emoji là ký tự Unicode, hiển thị bằng bộ emoji của hệ điều h�
 
 ## Quảng cáo Adsterra
 
-Social Bar, Popunder và Native Banner được tích hợp ở frontend bằng mã Adsterra được cấp cho website. Backend không tạo phiên quảng cáo, xác nhận lượt xem hoặc phát coupon từ thao tác mở quảng cáo.
+Social Bar, Popunder và Native Banner được tích hợp ở frontend bằng mã Adsterra được cấp cho website. Adsterra không cung cấp xác nhận xem có thưởng trong tích hợp này. Backend không xác nhận lượt xem quảng cáo, lượt nhấp vào quảng cáo đối tác hoặc doanh thu.
 
 Đã gỡ adapter AdGem, các endpoint `rewarded-tasks` và `/api/postbacks/adgem/v3`, cùng cấu hình `REWARDED_TASK_*` và `ADGEM_*`. Các đường dẫn cũ trả 404; biến môi trường cũ không kích hoạt lại được hệ thống nhiệm vụ. Khi triển khai, khởi động lại API/worker để tải mã và route cache mới.
 
-Giữ nguyên các bảng lịch sử quảng cáo và chuyển đổi để mã giảm giá đã lưu còn được kiểm tra và sử dụng theo điều kiện ban đầu. Không có migration xóa dữ liệu hoặc tạo phần thưởng quảng cáo mới.
+Giữ nguyên các bảng lịch sử quảng cáo và chuyển đổi để mã giảm giá đã lưu còn được kiểm tra và sử dụng theo điều kiện ban đầu. Luồng mã vận chuyển bên dưới dùng bảng riêng, không kích hoạt lại endpoint quảng cáo cũ.
+
+## Phí vận chuyển Hà Nội
+
+Chạy `php artisan migrate --force` để thêm `shop_shipping_settings` và các cột vận chuyển của đơn hàng. Không có migration xóa dữ liệu; đơn cũ có phí vận chuyển trong hệ thống bằng 0. Chủ shop cấu hình phí trong tab Cửa hàng trên frontend, mặc định tắt.
+
+`GET/PUT /api/shop/shipping-settings` chỉ cho chủ shop đang hoạt động. Dữ liệu gồm `enabled`, `base_fee` và `ward_rates: [{ward_code, fee}]`; mức riêng thay thế phí mặc định, mỗi phường/xã chỉ có một mức và phải thuộc Hà Nội. Không tự đặt mức phí thay shop.
+
+`POST /api/shops/{shopCode}/products/{slug}/shipping-quote` nhận `shipping_province_code` và `shipping_ward_code`, trả `shipping_quote`. Phí chỉ xác định khi địa chỉ thuộc Hà Nội và shop đã bật cấu hình; nếu chưa có báo phí, `fee` là `null`.
+
+Checkout yêu cầu `quoted_shipping_fee` khớp phí hiện tại khi có báo phí. Server tự tính `shipping_fee`, `shipping_discount_amount`, `shipping_total` và tổng đơn; nếu phí đã thay đổi, trả lỗi tại `quoted_shipping_fee` để khách kiểm tra lại. Địa chỉ ngoài Hà Nội/shop chưa cấu hình giữ cách tính tiền hàng hiện tại.
+
+### Ưu đãi mã miễn phí vận chuyển
+
+Chạy `php artisan migrate --force` để thêm `shipping_reward_views` và `shipping_discount_codes`. Luồng này mặc định **tắt** (`SHIPPING_REWARDS_ENABLED=false`); đặt `SHIPPING_REWARDS_ENABLED=true` và nạp lại cấu hình để bật. Adsterra hạn chế lưu lượng được khuyến khích bằng phần thưởng, nên cần đối chiếu thỏa thuận với nhà cung cấp trước khi vận hành. Cờ này chỉ bật chương trình nội bộ của website.
+
+Khi bật và shop đã cấu hình vận chuyển, `GET /api/shops/{shopCode}/products/{slug}/shipping-offer` trả khả dụng. `POST .../shipping-offer/views` yêu cầu đăng nhập, tạo phiên 15 phút nhưng chưa phát mã. Nút **Xem** của Deal Hay gọi `POST .../shipping-offer/views/{id}/redeem` để nhận mã nội bộ; đây là hành động nhận ưu đãi của ứng dụng, không phải xác nhận đã xem hoặc nhấp quảng cáo Adsterra. Không gắn phát mã vào lượt nhấp liên kết do mạng quảng cáo tạo.
+
+Mỗi người dùng chỉ giữ một mã chưa dùng còn hạn cho một sản phẩm; gọi lại cùng phiên hoặc phiên khác trả lại mã đó. `GET .../shipping-offer/code` yêu cầu đăng nhập và trả mã hiện tại để tiếp tục sau khi tải lại trang. Thời hạn mặc định 7 ngày, cấu hình bằng `SHIPPING_REWARDS_COUPON_DAYS`; thời hạn phiên bằng `SHIPPING_REWARDS_SESSION_MINUTES`.
+
+Checkout nhận `shipping_discount_code` riêng với các mã giảm tiền hàng. Mã áp dụng một lần, đúng người dùng/sản phẩm, chỉ khi có phí vận chuyển Hà Nội lớn hơn 0 và báo phí hiện tại đã được chấp nhận; giảm 100% phí đang cấu hình, không giảm tiền hàng. Server kiểm tra và sử dụng mã trong cùng giao dịch tạo đơn, giữ nguyên kết quả khi gửi lại cùng `Idempotency-Key`. Tắt chương trình ngừng phát mã mới; mã đã phát còn hạn vẫn có thể dùng theo các điều kiện trên.
 
 ## Docker
 

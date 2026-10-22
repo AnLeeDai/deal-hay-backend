@@ -7,6 +7,9 @@ use Aws\Command;
 use Aws\Exception\AwsException;
 use Aws\MockHandler;
 use Aws\Result;
+use Illuminate\Cache\RateLimiter;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 
@@ -123,6 +126,76 @@ it('reuses dependency samples for fifteen seconds and then measures again', func
 
     expect($second->json('checked_at'))->toBe($first->json('checked_at'));
     expect($third->json('checked_at'))->not->toBe($first->json('checked_at'));
+    $first->assertJsonPath('request.probes_cached', false);
+    $second->assertJsonPath('request.probes_cached', true);
+    $third->assertJsonPath('request.probes_cached', false);
+});
+
+it('measures each API request including bearer authentication without reusing cached request timings', function (): void {
+    $this->freezeSecond();
+    $user = User::factory()->customer()->create();
+    $token = $user->createToken('diagnostics-test')->plainTextToken;
+    config(['filesystems.disks.r2.driver' => 'local', 'broadcasting.default' => 'null']);
+
+    $first = $this->withToken($token)->getJson('/api/diagnostics')
+        ->assertOk()
+        ->assertHeaderContains('Server-Timing', 'app;dur=')
+        ->assertHeaderContains('Server-Timing', 'db;dur=')
+        ->assertJsonPath('request.database_queries', 4)
+        ->assertJsonPath('request.probes_cached', false)
+        ->assertJsonPath('request.limiter_store', 'array');
+    $this->travel(1)->seconds();
+    Auth::forgetGuards();
+    $second = $this->withToken($token)->getJson('/api/diagnostics')
+        ->assertOk()
+        ->assertJsonPath('request.database_queries', 3)
+        ->assertJsonPath('request.probes_cached', true);
+
+    expect($second->json('checked_at'))->toBe($first->json('checked_at'));
+    expect($first->json('request.duration_ms'))->toBeNumeric()->toBeGreaterThanOrEqual(0);
+    expect($first->json('request.database_ms'))->toBeNumeric()->toBeGreaterThanOrEqual(0);
+    expect($second->json('request.database_ms'))->toBeNumeric()->toBeGreaterThanOrEqual(0);
+    expect(request()->attributes->has('diagnostics.sql'))->toBeFalse();
+});
+
+it('keeps diagnostic request metrics out of ordinary API responses', function (): void {
+    $user = User::factory()->customer()->create();
+    $token = $user->createToken('diagnostics-test')->plainTextToken;
+
+    $this->withToken($token)->getJson('/api/diagnostics')->assertOk();
+    Auth::forgetGuards();
+    $this->withToken($token)->getJson('/api/auth/me')
+        ->assertOk()
+        ->assertHeaderMissing('Server-Timing')
+        ->assertJsonMissingPath('request');
+});
+
+it('includes the database rate limiter queries in request metrics with fresh and cached samples', function (): void {
+    $this->freezeSecond();
+    $user = User::factory()->customer()->create();
+    $token = $user->createToken('diagnostics-test')->plainTextToken;
+    config([
+        'cache.default' => 'database',
+        'cache.limiter' => 'database',
+        'filesystems.disks.r2.driver' => 'local',
+        'broadcasting.default' => 'null',
+    ]);
+    $limit = app(RateLimiter::class)->limiter('diagnostics');
+    $limiter = new RateLimiter(Cache::store('database'));
+    $limiter->for('diagnostics', $limit);
+    $this->app->instance(RateLimiter::class, $limiter);
+
+    $this->withToken($token)->getJson('/api/diagnostics')
+        ->assertOk()
+        ->assertJsonPath('request.database_queries', 13)
+        ->assertJsonPath('request.limiter_store', 'database')
+        ->assertJsonPath('request.probes_cached', false);
+    $this->travel(1)->seconds();
+    Auth::forgetGuards();
+    $this->withToken($token)->getJson('/api/diagnostics')
+        ->assertOk()
+        ->assertJsonPath('request.database_queries', 9)
+        ->assertJsonPath('request.probes_cached', true);
 });
 
 it('limits diagnostic requests per user', function (): void {

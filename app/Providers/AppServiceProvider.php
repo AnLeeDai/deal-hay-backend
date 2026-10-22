@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\OutboxWorkerHealth;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Notifications\ResetPassword as ResetPasswordNotification;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Events\DiagnosingHealth;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Cache;
@@ -32,6 +33,26 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
         $this->configureOutboxWorkerHeartbeat();
         $this->configureProductionHealthChecks();
+        $this->configureDiagnosticsQueryTiming();
+    }
+
+    private function configureDiagnosticsQueryTiming(): void
+    {
+        Event::listen(QueryExecuted::class, function (QueryExecuted $event): void {
+            if (! $this->app->bound('request')) {
+                return;
+            }
+
+            $request = $this->app['request'];
+            $metrics = $request->attributes->get('diagnostics.sql');
+            if (! is_array($metrics)) {
+                return;
+            }
+
+            $metrics['queries']++;
+            $metrics['milliseconds'] += $event->time;
+            $request->attributes->set('diagnostics.sql', $metrics);
+        });
     }
 
     private function configureOutboxWorkerHeartbeat(): void

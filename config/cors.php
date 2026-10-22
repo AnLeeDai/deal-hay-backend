@@ -7,6 +7,6 @@ return [
     'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
     'exposed_headers' => ['X-Request-ID', 'Idempotency-Replayed'],
-    'max_age' => 0,
+    'max_age' => (int) env('CORS_MAX_AGE', 600),
     'supports_credentials' => false,
 ];

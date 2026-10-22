@@ -91,7 +91,7 @@ class ImageService
             throw new ImageDecoderException('Không thể đọc kích thước hình ảnh tải lên.');
         }
 
-        $this->assertSafeDimensions((int) $imageInfo[0], (int) $imageInfo[1]);
+        $this->assertSafeDimensions((int) $imageInfo[0], (int) $imageInfo[1], (int) $file->getSize());
 
         $encoded = (string) $this->manager
             ->decodeSplFileInfo($file)
@@ -125,7 +125,7 @@ class ImageService
             throw new ImageDecoderException('Nội dung tải lên không phải là hình ảnh hợp lệ.');
         }
 
-        $this->assertSafeDimensions((int) $imageInfo[0], (int) $imageInfo[1]);
+        $this->assertSafeDimensions((int) $imageInfo[0], (int) $imageInfo[1], strlen($content));
 
         $encoded = (string) $this->manager
             ->decodeBinary($content)
@@ -372,7 +372,23 @@ class ImageService
         }
     }
 
-    private function assertSafeDimensions(int $width, int $height): void
+    public static function assertMemoryBudget(int $width, int $height, int $sourceBytes): void
+    {
+        $memoryLimit = ini_parse_quantity((string) ini_get('memory_limit'));
+
+        if ($memoryLimit < 0) {
+            return;
+        }
+
+        // Allow for a decoded raster, a transformed copy, input buffers, and framework work.
+        $requiredBytes = $width * $height * 8 + $sourceBytes * 2 + 8 * 1024 * 1024;
+
+        if ($requiredBytes > $memoryLimit - memory_get_usage(true)) {
+            throw new ImageDecoderException('Ảnh cần quá nhiều bộ nhớ để xử lý. Vui lòng giảm kích thước hoặc độ phân giải ảnh rồi thử lại.');
+        }
+    }
+
+    private function assertSafeDimensions(int $width, int $height, int $sourceBytes): void
     {
         if (
             $width < 1
@@ -383,6 +399,8 @@ class ImageService
         ) {
             throw new ImageDecoderException('Kích thước hoặc tổng số điểm ảnh vượt quá giới hạn an toàn.');
         }
+
+        self::assertMemoryBudget($width, $height, $sourceBytes);
     }
 
     private function assertSafeEncodedSize(string $content): string

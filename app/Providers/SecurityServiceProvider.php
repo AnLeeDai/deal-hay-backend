@@ -28,6 +28,8 @@ class SecurityServiceProvider extends ServiceProvider
 
         RateLimiter::for('broadcast-auth', fn (Request $request): Limit => Limit::perMinute(120)
             ->by((string) ($request->user()?->getKey() ?: $request->ip())));
+        RateLimiter::for('diagnostics', fn (Request $request): Limit => Limit::perMinute(6)
+            ->by((string) ($request->user()?->getKey() ?: $request->ip())));
         RateLimiter::for('presence-heartbeat', fn (Request $request): Limit => Limit::perMinute(12)
             ->by((string) ($request->user()?->getKey() ?: $request->ip())));
         RateLimiter::for('start-chat', fn (Request $request): Limit => Limit::perMinute(10)

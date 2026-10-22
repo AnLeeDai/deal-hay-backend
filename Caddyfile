@@ -1,12 +1,18 @@
 {
 	auto_https off
 	admin off
-	frankenphp
+	frankenphp {
+		num_threads {$FRANKENPHP_NUM_THREADS:2}
+		max_threads {$FRANKENPHP_MAX_THREADS:2}
+	}
 }
 
 :{$PORT:10000} {
 	root * /app/public
-	encode zstd br gzip
+	encode {
+		gzip 1
+		minimum_length 1024
+	}
 
 	log {
 		output stdout

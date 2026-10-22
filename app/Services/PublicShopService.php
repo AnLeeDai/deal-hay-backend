@@ -20,12 +20,10 @@ class PublicShopService
     /** @return array{code: string, name: string, avatar_url: string|null, address: string, products_count: int} */
     public function featuredPayload(User $shop): array
     {
-        $payload = $shop->toArray();
-
         return [
             'code' => (string) $shop->user_code,
             'name' => (string) ($shop->shop_name ?: 'Cửa hàng DealHay'),
-            'avatar_url' => $payload['shop_avatar_url'],
+            'avatar_url' => app(MediaClient::class)->url($shop->shop_avatar_url),
             'address' => collect([$shop->shop_ward, $shop->shop_province])
                 ->filter()
                 ->implode(', '),
@@ -39,7 +37,6 @@ class PublicShopService
      */
     public function payload(User $shop, array $engagementMetrics): array
     {
-        $payload = $shop->toArray();
         $lastActivity = $this->presence->lastSeenAt((string) $shop->getKey());
 
         return [
@@ -47,7 +44,7 @@ class PublicShopService
             'name' => (string) ($shop->shop_name ?: 'Cửa hàng DealHay'),
             'email' => (string) ($shop->shop_email ?: ''),
             'phone_number' => (string) ($shop->shop_phone_number ?: ''),
-            'avatar_url' => $payload['shop_avatar_url'],
+            'avatar_url' => app(MediaClient::class)->url($shop->shop_avatar_url),
             'address' => collect([
                 $shop->shop_address_detail,
                 $shop->shop_ward,

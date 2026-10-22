@@ -29,6 +29,8 @@ All successful JSON responses use UTF-8 JSON. Validation failures return `422 { 
 
 ## Tickets, notifications, presence
 
+`GET /diagnostics` requires an active signed-in user and allows six requests per minute per account. It returns `{ checked_at, duration_ms, checks: { database, cache, storage, reverb } }`. Each check has `{ status: "ok" | "failed" | "skipped", latency_ms: number | null, message }`. Dependency failures remain HTTP 200 with a failed check; authentication and rate limiting use 401/403/429. Samples are cached for 15 seconds on the API host while responses use `Cache-Control: no-store`. Times measure application operations, including SQL or handshakes, and are not pure network ping. Only configured servers are probed; credentials, hostnames and internal errors are omitted.
+
 | Method | Path | Auth | Request body | Response shape |
 |---|---|---|---|---|
 | POST | `/tickets` | Public for lock appeal, Bearer for notification appeal | `user_id`, `type`, `message`, `source?`, `notification_id?`, `notification_title?` | `201 { message, ticket_submitted, data }` |

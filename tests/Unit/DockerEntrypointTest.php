@@ -67,6 +67,61 @@ test('the combined API and worker starts from the environment or explicit role a
     'explicit role overrides environment' => [['DEPLOY_ROLE' => 'web'], ['web-worker']],
 ]);
 
+test('HTTP concurrency reserves memory for the combined worker role', function (string $role, string $threads): void {
+    $result = runDockerEntrypoint(['DEPLOY_ROLE' => $role]);
+
+    expect($result['exit_code'])->toBe(0);
+    expect($result['runtime_environment']['FRANKENPHP_NUM_THREADS'])->toBe($threads);
+    expect($result['runtime_environment']['FRANKENPHP_MAX_THREADS'])->toBe($threads);
+})->with([
+    'HTTP service' => ['web', '2'],
+    'combined service' => ['web-worker', '1'],
+]);
+
+test('worker roles receive bounded memory and recycling defaults', function (string $role): void {
+    $result = runDockerEntrypoint(['DEPLOY_ROLE' => $role]);
+
+    expect($result['exit_code'])->toBe(0);
+    expect($result['runtime_environment'])->toMatchArray([
+        'QUEUE_SLEEP' => '3',
+        'QUEUE_MEMORY' => '96',
+        'QUEUE_MEMORY_LIMIT' => '128M',
+        'QUEUE_MAX_JOBS' => '500',
+        'QUEUE_MAX_TIME' => '3600',
+    ]);
+})->with(['worker', 'web-worker']);
+
+test('runtime limits can be tuned explicitly for larger deployments', function (): void {
+    $limits = [
+        'FRANKENPHP_NUM_THREADS' => '3',
+        'FRANKENPHP_MAX_THREADS' => '4',
+        'QUEUE_SLEEP' => '5',
+        'QUEUE_MEMORY' => '192',
+        'QUEUE_MEMORY_LIMIT' => '256M',
+        'QUEUE_MAX_JOBS' => '1000',
+        'QUEUE_MAX_TIME' => '7200',
+    ];
+    $result = runDockerEntrypoint(['DEPLOY_ROLE' => 'web-worker', ...$limits]);
+
+    expect($result['exit_code'])->toBe(0);
+    expect($result['runtime_environment'])->toBe($limits);
+});
+
+test('invalid runtime limits fail before service startup', function (array $limits, string $variable): void {
+    $result = runDockerEntrypoint(['DEPLOY_ROLE' => 'web-worker', ...$limits]);
+
+    expect($result['exit_code'])->toBe(1);
+    expect($result['stderr'])->toContain($variable);
+    expect($result['commands'])->toBeEmpty();
+})->with([
+    'zero HTTP threads' => [['FRANKENPHP_NUM_THREADS' => '0'], 'FRANKENPHP_NUM_THREADS'],
+    'HTTP maximum below initial threads' => [['FRANKENPHP_NUM_THREADS' => '3', 'FRANKENPHP_MAX_THREADS' => '2'], 'FRANKENPHP_MAX_THREADS'],
+    'busy polling' => [['QUEUE_SLEEP' => '0'], 'QUEUE_SLEEP'],
+    'non-numeric polling interval' => [['QUEUE_SLEEP' => 'invalid'], 'QUEUE_SLEEP'],
+    'negative worker memory' => [['QUEUE_MEMORY' => '-1'], 'QUEUE_MEMORY'],
+    'negative recycling interval' => [['QUEUE_MAX_TIME' => '-1'], 'QUEUE_MAX_TIME'],
+]);
+
 test('opt-in API migrations complete before optimization and service startup', function (string $role, string $flag, string $supervisorConfiguration): void {
     $result = runDockerEntrypoint([
         'DEPLOY_ROLE' => $role,
@@ -184,18 +239,20 @@ test('an optimization failure prevents service startup', function (): void {
 /**
  * @param  array<string, string|false>  $environment
  * @param  list<string>  $arguments
- * @return array{exit_code: ?int, stderr: string, commands: list<string>, server_bindings: list<array{host: string, port: string}>}
+ * @return array{exit_code: ?int, stderr: string, commands: list<string>, server_bindings: list<array{host: string, port: string}>, runtime_environment: array<string, string>}
  */
 function runDockerEntrypoint(array $environment = [], array $arguments = ['start']): array
 {
     $fixtureDirectory = sys_get_temp_dir().'/deal-hay-entrypoint-'.bin2hex(random_bytes(8));
     mkdir($fixtureDirectory.'/bin', 0700, true);
     $commandLog = $fixtureDirectory.'/commands.log';
+    $runtimeLog = $fixtureDirectory.'/runtime.log';
 
     $fakeCommand = <<<'SH'
 #!/bin/sh
 set -eu
 printf '%s\t%s\t%s\n' "${0##*/} $*" "${REVERB_SERVER_HOST:-}" "${REVERB_SERVER_PORT:-}" >> "$TEST_COMMAND_LOG"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${FRANKENPHP_NUM_THREADS:-}" "${FRANKENPHP_MAX_THREADS:-}" "${QUEUE_SLEEP:-}" "${QUEUE_MEMORY:-}" "${QUEUE_MEMORY_LIMIT:-}" "${QUEUE_MAX_JOBS:-}" "${QUEUE_MAX_TIME:-}" >> "$TEST_RUNTIME_LOG"
 if [ "${1:-}" = "artisan" ] && [ "${2:-}" = "${TEST_FAIL_ARTISAN_COMMAND:-}" ]; then
     exit 42
 fi
@@ -224,7 +281,15 @@ SH;
                 'REVERB_SERVER_PORT' => '',
                 'RUN_MIGRATIONS' => 'false',
                 'TEST_COMMAND_LOG' => $commandLog,
+                'TEST_RUNTIME_LOG' => $runtimeLog,
                 'TEST_FAIL_ARTISAN_COMMAND' => '',
+                'FRANKENPHP_NUM_THREADS' => false,
+                'FRANKENPHP_MAX_THREADS' => false,
+                'QUEUE_SLEEP' => false,
+                'QUEUE_MEMORY' => false,
+                'QUEUE_MEMORY_LIMIT' => false,
+                'QUEUE_MAX_JOBS' => false,
+                'QUEUE_MAX_TIME' => false,
             ], $environment),
             timeout: 5,
         );
@@ -235,6 +300,18 @@ SH;
             : [];
         $commands = [];
         $serverBindings = [];
+        $runtimeExecutions = file_exists($runtimeLog)
+            ? file($runtimeLog, FILE_IGNORE_NEW_LINES)
+            : [];
+        $runtimeEnvironment = $runtimeExecutions === [] ? [] : array_combine([
+            'FRANKENPHP_NUM_THREADS',
+            'FRANKENPHP_MAX_THREADS',
+            'QUEUE_SLEEP',
+            'QUEUE_MEMORY',
+            'QUEUE_MEMORY_LIMIT',
+            'QUEUE_MAX_JOBS',
+            'QUEUE_MAX_TIME',
+        ], explode("\t", end($runtimeExecutions)));
 
         foreach ($executions as $execution) {
             [$command, $host, $port] = explode("\t", $execution);
@@ -247,9 +324,10 @@ SH;
             'stderr' => $process->getErrorOutput(),
             'commands' => $commands,
             'server_bindings' => $serverBindings,
+            'runtime_environment' => $runtimeEnvironment,
         ];
     } finally {
-        foreach (['bin/php', 'bin/supervisord', 'commands.log'] as $file) {
+        foreach (['bin/php', 'bin/supervisord', 'commands.log', 'runtime.log'] as $file) {
             if (file_exists($fixtureDirectory.'/'.$file)) {
                 unlink($fixtureDirectory.'/'.$file);
             }

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -16,51 +17,36 @@ class AddressService
 
     public function provinceCode(mixed $province, bool $useCodes = false): ?int
     {
-        if ((! is_string($province) && ! is_int($province)) || ($useCodes && ! ctype_digit((string) $province))) {
-            return null;
-        }
-
-        $code = DB::table('addresses')
-            ->whereIn('division_type', self::PROVINCE_DIVISION_TYPES)
-            ->where($useCodes ? 'code' : 'name', $province)
-            ->value('code');
-
-        return $code === null ? null : (int) $code;
+        return $this->findProvince($province, $useCodes)['code'] ?? null;
     }
 
     public function wardBelongsToProvince(mixed $ward, mixed $province, bool $useCodes = false): bool
     {
         $provinceCode = $this->provinceCode($province, $useCodes);
 
-        if ($provinceCode === null || (! is_string($ward) && ! is_int($ward)) || ($useCodes && ! ctype_digit((string) $ward))) {
-            return false;
-        }
-
-        return DB::table('addresses')
-            ->whereIn('division_type', self::WARD_DIVISION_TYPES)
-            ->where('parent_code', $provinceCode)
-            ->where($useCodes ? 'code' : 'name', $ward)
-            ->exists();
+        return $provinceCode !== null && $this->findWard($ward, $provinceCode, $useCodes) !== null;
     }
 
     public function formatShippingAddress(string $detail, int $provinceCode, int $wardCode): string
     {
-        if (! $this->wardBelongsToProvince($wardCode, $provinceCode, true)) {
+        $province = $this->findProvince($provinceCode, true);
+        $ward = $province === null ? null : $this->findWard($wardCode, $provinceCode, true);
+
+        if ($ward === null) {
             throw ValidationException::withMessages([
                 'shipping_ward_code' => 'Vui lòng chọn phường/xã thuộc tỉnh/thành đã chọn.',
             ]);
         }
 
-        $names = DB::table('addresses')->whereIn('code', [$provinceCode, $wardCode])->pluck('name', 'code');
-
-        return implode(', ', [trim($detail), $names[$wardCode], $names[$provinceCode]]);
+        return implode(', ', [trim($detail), $ward['name'], $province['name']]);
     }
 
     /** @return array<int, array{code:int,name:string}> */
     public function provinces(): array
     {
         $cacheKey = 'addresses.provinces';
-        $cached = $this->normalizeProvinces(Cache::get($cacheKey));
+        $cache = $this->referenceCache();
+        $cached = $this->normalizeProvinces($cache->get($cacheKey));
 
         if ($cached !== []) {
             return $cached;
@@ -76,7 +62,9 @@ class AddressService
                 'name' => (string) $province->name,
             ])->all();
 
-        Cache::put($cacheKey, $provinces, self::CACHE_TTL_SECONDS);
+        if ($provinces !== []) {
+            $cache->put($cacheKey, $provinces, self::CACHE_TTL_SECONDS);
+        }
 
         return $provinces;
     }
@@ -84,8 +72,13 @@ class AddressService
     /** @return array<int, array{code:int,name:string,division_type:string}> */
     public function wards(int $provinceCode): array
     {
+        if ($this->provinceCode($provinceCode, true) === null) {
+            return [];
+        }
+
         $cacheKey = sprintf('addresses.wards.%d', $provinceCode);
-        $wards = $this->normalizeWards(Cache::get($cacheKey));
+        $cache = $this->referenceCache();
+        $wards = $this->normalizeWards($cache->get($cacheKey));
 
         if ($wards !== []) {
             return $wards;
@@ -103,9 +96,52 @@ class AddressService
                 'division_type' => (string) $ward->division_type,
             ])->all();
 
-        Cache::put($cacheKey, $wards, self::CACHE_TTL_SECONDS);
+        if ($wards !== []) {
+            $cache->put($cacheKey, $wards, self::CACHE_TTL_SECONDS);
+        }
 
         return $wards;
+    }
+
+    /** @return array{code:int,name:string}|null */
+    private function findProvince(mixed $province, bool $useCodes): ?array
+    {
+        if ((! is_string($province) && ! is_int($province)) || ($useCodes && ! ctype_digit((string) $province))) {
+            return null;
+        }
+
+        $value = $useCodes ? (int) $province : (string) $province;
+
+        foreach ($this->provinces() as $candidate) {
+            if ($candidate[$useCodes ? 'code' : 'name'] === $value) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /** @return array{code:int,name:string,division_type:string}|null */
+    private function findWard(mixed $ward, int $provinceCode, bool $useCodes): ?array
+    {
+        if ((! is_string($ward) && ! is_int($ward)) || ($useCodes && ! ctype_digit((string) $ward))) {
+            return null;
+        }
+
+        $value = $useCodes ? (int) $ward : (string) $ward;
+
+        foreach ($this->wards($provinceCode) as $candidate) {
+            if ($candidate[$useCodes ? 'code' : 'name'] === $value) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function referenceCache(): Repository
+    {
+        return Cache::memo((string) config('cache.reference_store', 'file'));
     }
 
     /** @return array<int, array{code:int,name:string}> */

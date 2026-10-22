@@ -17,6 +17,11 @@ return [
 
     'default' => env('CACHE_STORE', 'database'),
 
+    // Reference data can stay local without adding round trips to the database.
+    'reference_store' => env('REFERENCE_CACHE_STORE', 'file'),
+
+    'limiter' => env('CACHE_LIMITER_STORE'),
+
     /*
     |--------------------------------------------------------------------------
     | Cache Stores

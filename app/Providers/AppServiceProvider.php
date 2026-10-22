@@ -24,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(ImageManager::class, fn () => new ImageManager(new Driver, decodeAnimation: false));
+        $this->app->singleton(OutboxWorkerHealth::class);
     }
 
     public function boot(): void

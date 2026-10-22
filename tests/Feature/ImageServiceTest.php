@@ -21,6 +21,32 @@ it('rejects oversized uploaded files before decoding', function (): void {
         ->toThrow(ImageDecoderException::class, 'Ảnh tải lên phải có kích thước từ 1 byte đến 30 MB.');
 });
 
+it('rejects images exceeding the available memory before decoding pixel data', function (bool $binary): void {
+    $header = substr(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='), 0, 33);
+    $header = substr_replace($header, pack('NN', 4000, 3000), 16, 8);
+    $file = UploadedFile::fake()->createWithContent('large.png', $header);
+    $previousLimit = ini_set('memory_limit', (string) (memory_get_usage(true) + 16 * 1024 * 1024));
+
+    try {
+        expect(fn () => $binary
+            ? app(ImageService::class)->normalizeBinary($header)
+            : app(ImageService::class)->convertToWebp($file))
+            ->toThrow(ImageDecoderException::class, 'Ảnh cần quá nhiều bộ nhớ để xử lý. Vui lòng giảm kích thước hoặc độ phân giải ảnh rồi thử lại.');
+    } finally {
+        ini_set('memory_limit', $previousLimit);
+    }
+})->with(['binary source' => [true], 'uploaded file' => [false]]);
+
+it('allows image memory budgeting when PHP has no memory limit', function (): void {
+    $previousLimit = ini_set('memory_limit', '-1');
+
+    try {
+        ImageService::assertMemoryBudget(8192, 8192, ImageService::MAX_SOURCE_BYTES);
+    } finally {
+        ini_set('memory_limit', $previousLimit);
+    }
+})->throwsNoExceptions();
+
 it('keeps shared system avatars when bulk image cleanup runs', function (): void {
     $disk = Storage::fake('r2');
     $disk->put('systems_avatar/systems_users_AV1.webp', 'Shared avatar.');

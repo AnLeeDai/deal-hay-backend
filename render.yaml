@@ -129,6 +129,8 @@ envVarGroups:
         value: reverb
       - key: CACHE_STORE
         value: database
+      - key: REFERENCE_CACHE_STORE
+        value: file
       - key: CACHE_PREFIX
         value: deal-hay-cache
       - key: QUEUE_CONNECTION

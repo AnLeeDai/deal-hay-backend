@@ -6,6 +6,7 @@ use App\Models\ShopProduct;
 use App\Models\ShopProductImage;
 use App\Models\ShopProductOption;
 use App\Models\ShopProductVariant;
+use App\Services\MediaClient;
 
 class PublicShopProductPayload
 {
@@ -13,8 +14,8 @@ class PublicShopProductPayload
     public static function forHome(ShopProduct $product): array
     {
         $shopOwner = $product->shopOwner;
-        $payload = $product->toArray();
-        $shopPayload = $shopOwner->toArray();
+        $media = app(MediaClient::class);
+        $displayPrice = self::displayPrice($product);
 
         return [
             'id' => (string) $product->id,
@@ -22,17 +23,17 @@ class PublicShopProductPayload
             'name' => (string) $product->name,
             'category' => (string) $product->productCategory->name,
             'price' => (int) $product->price,
-            'display_price' => self::displayPrice($product),
+            'display_price' => $displayPrice,
             'old_price' => $product->old_price,
-            'display_original_price' => $product->regularPrice(self::displayPrice($product)),
+            'display_original_price' => $product->regularPrice($displayPrice),
             'stock' => (int) $product->stock,
             'has_variants' => (bool) $product->has_variants,
             'label' => $product->label,
-            'image_url' => $payload['image_url'],
+            'image_url' => $media->url($product->image_url),
             'shop' => [
                 'code' => (string) $shopOwner->user_code,
                 'name' => (string) ($shopOwner->shop_name ?: 'Cửa hàng DealHay'),
-                'avatar_url' => $shopPayload['shop_avatar_url'],
+                'avatar_url' => $media->url($shopOwner->shop_avatar_url),
             ],
         ];
     }
@@ -40,7 +41,8 @@ class PublicShopProductPayload
     /** @return array<string, mixed> */
     public static function forShop(ShopProduct $product, bool $includeVariants = true): array
     {
-        $payload = $product->toArray();
+        $media = app(MediaClient::class);
+        $displayPrice = self::displayPrice($product);
 
         return [
             'id' => (string) $product->id,
@@ -51,20 +53,18 @@ class PublicShopProductPayload
             'description' => $product->description,
             'video_url' => $product->video_url,
             'price' => (int) $product->price,
-            'display_price' => self::displayPrice($product),
+            'display_price' => $displayPrice,
             'old_price' => $product->old_price,
-            'display_original_price' => $product->regularPrice(self::displayPrice($product)),
+            'display_original_price' => $product->regularPrice($displayPrice),
             'stock' => (int) $product->stock,
             'has_variants' => (bool) $product->has_variants,
             'label' => $product->label,
-            'image_url' => $payload['image_url'],
+            'image_url' => $media->url($product->image_url),
             'images' => $product->relationLoaded('images')
-                ? $product->images->map(function (ShopProductImage $image): array {
-                    $imagePayload = $image->toArray();
-
+                ? $product->images->map(function (ShopProductImage $image) use ($media): array {
                     return [
                         'id' => (string) $image->id,
-                        'image_url' => (string) $imagePayload['image_url'],
+                        'image_url' => (string) $media->url($image->image_url),
                     ];
                 })->all()
                 : [],

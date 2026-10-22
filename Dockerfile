@@ -65,13 +65,17 @@ ENV APP_ENV=production \
     DEPLOY_ROLE=web \
     LOG_CHANNEL=stderr \
     LOG_LEVEL=info \
+    GOMEMLIMIT=64MiB \
+    GOMAXPROCS=1 \
     PORT=10000 \
+    REFERENCE_CACHE_STORE=file \
     REVERB_SERVER_HOST=0.0.0.0 \
     QUEUE_NAMES=realtime,images,default
 
 USER app
 
-RUN frankenphp version
+RUN frankenphp version \
+    && frankenphp validate --config /etc/frankenphp/Caddyfile --adapter caddyfile
 
 EXPOSE 10000
 

@@ -2,7 +2,9 @@
 
 use App\Services\OutboxWorkerHealth;
 use App\Services\ReverbProtocolHealth;
+use Illuminate\Cache\Repository;
 use Illuminate\Queue\Events\Looping;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 
 beforeEach(function (): void {
@@ -179,3 +181,46 @@ it('keeps the queue loop running when its heartbeat cache is unavailable', funct
         ->assertServiceUnavailable()
         ->assertJsonPath('checks.outbox_worker', 'failed');
 });
+
+it('writes at most one worker heartbeat per thirty seconds across queue loops', function (): void {
+    $this->freezeTime();
+    $timestamp = now()->getTimestamp();
+    $repository = Mockery::mock(Repository::class);
+    $repository->shouldReceive('put')->once()
+        ->with('dealhay:health:outbox-worker', $timestamp, 180)->andReturnTrue();
+    $repository->shouldReceive('put')->once()
+        ->with('dealhay:health:outbox-worker', $timestamp + 30, 180)->andReturnTrue();
+    Cache::shouldReceive('store')->withNoArgs()->twice()->andReturn($repository);
+
+    Event::dispatch(new Looping('database_outbox', 'realtime,images,default'));
+    $this->travel(29)->seconds();
+    Event::dispatch(new Looping('database_outbox', 'realtime,images,default'));
+    $this->travel(1)->seconds();
+    Event::dispatch(new Looping('database_outbox', 'realtime,images,default'));
+});
+
+it('retries a failed heartbeat on the next queue loop without waiting thirty seconds', function (bool $throws): void {
+    $this->freezeTime();
+    $attempts = 0;
+    $repository = Mockery::mock(Repository::class);
+    $repository->shouldReceive('put')->twice()->andReturnUsing(function () use (&$attempts, $throws): bool {
+        $attempts++;
+
+        if ($attempts === 1) {
+            if ($throws) {
+                throw new RuntimeException('Heartbeat cache unavailable.');
+            }
+
+            return false;
+        }
+
+        return true;
+    });
+    Cache::shouldReceive('store')->withNoArgs()->twice()->andReturn($repository);
+
+    Event::dispatch(new Looping('database_outbox', 'realtime'));
+    Event::dispatch(new Looping('database_outbox', 'realtime'));
+    Event::dispatch(new Looping('database_outbox', 'realtime'));
+
+    expect($attempts)->toBe(2);
+})->with(['exception' => [true], 'unsuccessful write' => [false]]);

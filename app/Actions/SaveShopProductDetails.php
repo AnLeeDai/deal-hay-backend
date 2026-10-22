@@ -613,24 +613,44 @@ class SaveShopProductDetails
     /** @param list<string> $paths */
     private function addGalleryPaths(ShopProduct $product, array $paths): void
     {
+        if ($paths === []) {
+            return;
+        }
+
         $displayOrder = (int) $product->images()->max('display_order');
+        $imageModel = $product->images()->getRelated();
+        $timestamp = $imageModel->freshTimestampString();
+        $rows = [];
 
         foreach ($paths as $path) {
-            $product->images()->create([
+            $rows[] = [
+                'id' => $imageModel->newUniqueId(),
+                'shop_product_id' => $product->getKey(),
                 'image_url' => $path,
                 'display_order' => ++$displayOrder,
-            ]);
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
+            ];
         }
+
+        $product->images()->insert($rows);
     }
 
     /** @param list<string> $imageIds @param list<string> $obsoletePaths */
     private function removeGalleryImages(ShopProduct $product, array $imageIds, array &$obsoletePaths): void
     {
-        $images = $product->images()->whereKey($imageIds)->get();
+        if ($imageIds === []) {
+            return;
+        }
+
+        $images = $product->images()->whereKey($imageIds)->get(['id', 'image_url']);
 
         foreach ($images as $image) {
             $obsoletePaths[] = $image->getRawOriginal('image_url');
-            $image->delete();
+        }
+
+        if ($images->isNotEmpty()) {
+            $product->images()->whereKey($images->modelKeys())->delete();
         }
     }
 }

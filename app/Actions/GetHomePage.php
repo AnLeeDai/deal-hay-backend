@@ -55,7 +55,13 @@ class GetHomePage
                 'shopOwner:id,user_code,shop_name,shop_avatar_url',
                 'variants' => fn ($query) => $query
                     ->select(['id', 'shop_product_id', 'price', 'stock', 'is_active', 'is_default', 'retired_at'])
-                    ->where('is_active', true),
+                    ->where('is_active', true)
+                    ->reorder()
+                    ->orderByRaw('CASE WHEN is_default = ? AND stock > 0 THEN 0 WHEN stock > 0 THEN 1 WHEN is_default = ? THEN 2 ELSE 3 END', [true, true])
+                    ->orderBy('position')
+                    ->orderBy('created_at')
+                    ->orderBy('id')
+                    ->limit(1),
             ])
             ->when($category !== '', fn (Builder $query) => $query
                 ->whereHas('productCategory', fn (Builder $query) => $query->where('name', $category)))

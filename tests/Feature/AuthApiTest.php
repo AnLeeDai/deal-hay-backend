@@ -1,9 +1,11 @@
 <?php
 
+use App\Actions\GetUserUnreadCounts;
 use App\Enums\UserRoleEnum;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 
@@ -97,6 +99,20 @@ it('returns unread message and notification counts scoped to the current user', 
     ]);
 
     Sanctum::actingAs($user);
+
+    DB::enableQueryLog();
+    try {
+        $unreadCounts = app(GetUserUnreadCounts::class)->handle($user);
+        $queryCount = count(DB::getQueryLog());
+    } finally {
+        DB::disableQueryLog();
+        DB::flushQueryLog();
+    }
+    expect($queryCount)->toBe(1);
+    expect($unreadCounts)->toBe([
+        'unread_messages_count' => 1,
+        'unread_notifications_count' => 1,
+    ]);
 
     $this->getJson('/api/auth/me')
         ->assertOk()

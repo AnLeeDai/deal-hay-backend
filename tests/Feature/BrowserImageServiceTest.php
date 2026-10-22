@@ -4,6 +4,7 @@ use App\Services\BrowserImageService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\Process\Process;
 
 function browserCameraPhoto(int $width, int $height, bool $portrait = false): UploadedFile
 {
@@ -24,7 +25,8 @@ function browserCameraPhoto(int $width, int $height, bool $portrait = false): Up
 }
 
 it('returns a small correctly oriented WebP for a 24 MP camera JPEG through the browser endpoint', function (): void {
-    $previousLimit = ini_set('memory_limit', '256M');
+    // The separate-process tests below cover fixed production memory limits.
+    $previousLimit = ini_set('memory_limit', (string) (memory_get_usage(true) + 256 * 1024 * 1024));
 
     try {
         $file = browserCameraPhoto(6000, 4000, portrait: true);
@@ -57,7 +59,31 @@ it('accepts a 26 MP camera source for every upload purpose', function (string $p
 
     try {
         $file = browserCameraPhoto(6240, 4160);
-        $content = app(BrowserImageService::class)->prepare($file, $purpose);
+        // Isolate the API's memory budget from the test runner's own allocations.
+        $process = new Process([
+            PHP_BINARY, '-d', 'memory_limit=256M', '-r',
+            <<<'PHP'
+            require $argv[1].'/vendor/autoload.php';
+            $application = require $argv[1].'/bootstrap/app.php';
+            $application->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+            $file = new Illuminate\Http\UploadedFile($argv[2], 'camera.jpg', 'image/jpeg', null, true);
+            echo $application->make(App\Services\BrowserImageService::class)->prepare($file, $argv[3]);
+            PHP,
+            base_path(),
+            $file->getRealPath(),
+            $purpose,
+        ], env: [
+            'APP_ENV' => 'testing',
+            'APP_DEBUG' => 'false',
+            'APP_CONFIG_CACHE' => base_path('bootstrap/cache/config-testing.php'),
+            'CACHE_STORE' => 'array',
+            'DB_CONNECTION' => 'sqlite',
+            'DB_DATABASE' => ':memory:',
+            'DB_URL' => '',
+            'LOG_CHANNEL' => 'null',
+        ]);
+        $process->mustRun();
+        $content = $process->getOutput();
         $info = getimagesizefromstring($content);
 
         expect($info['mime'])->toBe('image/webp');
@@ -127,3 +153,81 @@ it('refuses a source above 32 MP before decoding it', function (): void {
         ini_set('memory_limit', $previousLimit);
     }
 });
+
+it('returns an image validation error before decoding a source exceeding the available memory', function (): void {
+    $header = substr(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='), 0, 33);
+    $header = substr_replace($header, pack('NN', 6000, 4000), 16, 8);
+    $file = UploadedFile::fake()->createWithContent('large.png', $header);
+    $token = 'isolated-memory-grant';
+    Cache::put('browser-upload:'.hash('sha256', $token), ['size' => $file->getSize(), 'purpose' => 'product'], now()->addMinutes(2));
+    $previousLimit = ini_set('memory_limit', (string) (memory_get_usage(true) + 16 * 1024 * 1024));
+
+    try {
+        $this->withHeaders(['Authorization' => 'Bearer '.$token, 'Accept' => 'application/json'])
+            ->post('/api/media/browser/transform', ['image' => $file])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.image.0', 'Ảnh cần quá nhiều bộ nhớ để xử lý. Vui lòng giảm kích thước hoặc độ phân giải ảnh rồi thử lại.');
+    } finally {
+        ini_set('memory_limit', $previousLimit);
+    }
+});
+
+it('handles real JPEGs safely in a separate 128 MiB API process', function (int $width, int $height, int $status): void {
+    $path = tempnam(sys_get_temp_dir(), 'camera-memory-budget-');
+
+    try {
+        $producer = new Process([
+            PHP_BINARY, '-d', 'memory_limit=256M', '-r',
+            <<<'PHP'
+            $image = imagecreatetruecolor((int) $argv[2], (int) $argv[3]);
+            imagejpeg($image, $argv[1], 90);
+            PHP,
+            $path,
+            (string) $width,
+            (string) $height,
+        ]);
+        $producer->mustRun();
+
+        $consumer = new Process([
+            PHP_BINARY, '-d', 'memory_limit=128M', '-r',
+            <<<'PHP'
+            require $argv[1].'/vendor/autoload.php';
+            $application = require $argv[1].'/bootstrap/app.php';
+            $kernel = $application->make(Illuminate\Contracts\Http\Kernel::class);
+            $kernel->bootstrap();
+            $file = new Illuminate\Http\UploadedFile($argv[2], 'camera.jpg', 'image/jpeg', null, true);
+            $token = 'isolated-subprocess-grant';
+            Illuminate\Support\Facades\Cache::put('browser-upload:'.hash('sha256', $token), ['size' => $file->getSize(), 'purpose' => 'product'], now()->addMinutes(2));
+            $request = Illuminate\Http\Request::create('/api/media/browser/transform', 'POST', [], [], ['image' => $file], ['HTTP_AUTHORIZATION' => 'Bearer '.$token, 'HTTP_ACCEPT' => 'application/json']);
+            $response = $kernel->handle($request);
+            echo json_encode(['status' => $response->getStatusCode(), 'errors' => $response->getStatusCode() === 422 ? json_decode($response->getContent(), true)['errors'] : [], 'content_type' => $response->headers->get('Content-Type'), 'peak_memory' => memory_get_peak_usage(true)], JSON_THROW_ON_ERROR);
+            PHP,
+            base_path(),
+            $path,
+        ], env: [
+            'APP_ENV' => 'testing',
+            'APP_DEBUG' => 'false',
+            'APP_CONFIG_CACHE' => base_path('bootstrap/cache/config-testing.php'),
+            'APP_KEY' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+            'CACHE_STORE' => 'array',
+            'DB_CONNECTION' => 'sqlite',
+            'DB_DATABASE' => ':memory:',
+            'DB_URL' => '',
+            'LOG_CHANNEL' => 'null',
+        ]);
+        $consumer->mustRun();
+        $result = json_decode($consumer->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+
+        expect($result['status'])->toBe($status);
+
+        if ($status === 422) {
+            expect($result['errors']['image'][0])->toBe('Ảnh cần quá nhiều bộ nhớ để xử lý. Vui lòng giảm kích thước hoặc độ phân giải ảnh rồi thử lại.');
+        } else {
+            expect($result['content_type'])->toBe('image/webp');
+        }
+
+        expect($result['peak_memory'])->toBeLessThan(128 * 1024 * 1024);
+    } finally {
+        unlink($path);
+    }
+})->with(['camera photo' => [6240, 4160, 422], 'ordinary photo' => [1600, 1200, 200]]);

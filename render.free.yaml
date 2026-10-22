@@ -17,6 +17,15 @@ services:
       - fromGroup: deal-hay-production
       - key: DEPLOY_ROLE
         value: web-worker
+      - key: FRANKENPHP_NUM_THREADS
+        value: "1"
+      - key: FRANKENPHP_MAX_THREADS
+        value: "1"
+      - key: REFERENCE_CACHE_STORE
+        value: file
+      # This Blueprint runs one API instance. Use a shared limiter store if scaling.
+      - key: CACHE_LIMITER_STORE
+        value: file
       - key: RUN_MIGRATIONS
         value: "true"
       - key: APP_ENV
@@ -38,6 +47,8 @@ services:
         value: database
       - key: QUEUE_NAMES
         value: realtime,images,default
+      - key: QUEUE_SLEEP
+        value: "3"
       - key: SESSION_DRIVER
         value: database
       - key: REVERB_HOST

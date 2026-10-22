@@ -221,15 +221,20 @@ class GetShopManagementData
     /** @return array<string, mixed> */
     private function metrics(User $shopOwner): array
     {
-        $orders = ShopOrder::query()->whereBelongsTo($shopOwner, 'shopOwner');
-        $completedOrders = (clone $orders)->where('status', 'completed');
+        $orders = ShopOrder::query()
+            ->whereBelongsTo($shopOwner, 'shopOwner')
+            ->selectRaw('COUNT(*) as total_orders_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) as completed_orders_count', ['completed'])
+            ->selectRaw('COALESCE(SUM(CASE WHEN status IN (?, ?, ?, ?) THEN 1 ELSE 0 END), 0) as open_orders_count', ['pending', 'confirmed', 'processing', 'shipping'])
+            ->selectRaw('COALESCE(SUM(CASE WHEN status = ? THEN total ELSE 0 END), 0) as total_revenue', ['completed'])
+            ->first();
 
         return [
             ...$this->engagementMetrics->handle($shopOwner),
-            'total_orders_count' => (clone $orders)->count(),
-            'completed_orders_count' => (clone $completedOrders)->count(),
-            'open_orders_count' => (clone $orders)->whereIn('status', ['pending', 'confirmed', 'processing', 'shipping'])->count(),
-            'total_revenue' => (int) (clone $completedOrders)->sum('total'),
+            'total_orders_count' => (int) $orders->total_orders_count,
+            'completed_orders_count' => (int) $orders->completed_orders_count,
+            'open_orders_count' => (int) $orders->open_orders_count,
+            'total_revenue' => (int) $orders->total_revenue,
             'total_stock' => (int) ShopProduct::query()->whereBelongsTo($shopOwner, 'shopOwner')->sum('stock'),
             'active_coupons_count' => $shopOwner->shopCoupons()->where('is_active', true)->count(),
         ];

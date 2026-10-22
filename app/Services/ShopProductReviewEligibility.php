@@ -24,11 +24,14 @@ class ShopProductReviewEligibility
 
     public function canReview(?User $viewer, ShopProduct $product): bool
     {
-        if (! $this->canManageOwnReview($viewer, $product)) {
-            return false;
-        }
+        return $this->permissions($viewer, $product)['can_review'];
+    }
 
-        return ShopOrder::query()
+    /** @return array{can_manage: bool, can_review: bool} */
+    public function permissions(?User $viewer, ShopProduct $product): array
+    {
+        $canManage = $this->canManageOwnReview($viewer, $product);
+        $canReview = $canManage && ShopOrder::query()
             ->where('customer_id', $viewer->getKey())
             ->where('shop_owner_id', $product->shop_owner_id)
             ->whereIn('status', ['pending', 'confirmed', 'processing', 'shipping', 'completed'])
@@ -37,5 +40,7 @@ class ShopProductReviewEligibility
                 ->where('shop_product_id', $product->getKey())
                 ->where('quantity', '>', 0))
             ->exists();
+
+        return ['can_manage' => $canManage, 'can_review' => $canReview];
     }
 }

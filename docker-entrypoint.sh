@@ -36,6 +36,50 @@ case "$role" in
         ;;
 esac
 
+validate_integer() {
+    case "$2" in
+        ""|*[!0-9]*)
+            echo "$1 must be an integer greater than or equal to $3." >&2
+            exit 1
+            ;;
+    esac
+
+    if ! [ "$2" -ge "$3" ] 2>/dev/null; then
+        echo "$1 must be an integer greater than or equal to $3." >&2
+        exit 1
+    fi
+}
+
+case "$role" in
+    web|web-worker)
+        default_threads=2
+
+        if [ "$role" = "web-worker" ]; then
+            default_threads=1
+        fi
+
+        export FRANKENPHP_NUM_THREADS="${FRANKENPHP_NUM_THREADS:-$default_threads}"
+        export FRANKENPHP_MAX_THREADS="${FRANKENPHP_MAX_THREADS:-$FRANKENPHP_NUM_THREADS}"
+        validate_integer FRANKENPHP_NUM_THREADS "$FRANKENPHP_NUM_THREADS" 1
+        validate_integer FRANKENPHP_MAX_THREADS "$FRANKENPHP_MAX_THREADS" "$FRANKENPHP_NUM_THREADS"
+        ;;
+esac
+
+case "$role" in
+    worker|web-worker)
+        export QUEUE_NAMES="${QUEUE_NAMES:-realtime,images,default}"
+        export QUEUE_SLEEP="${QUEUE_SLEEP:-3}"
+        export QUEUE_MEMORY="${QUEUE_MEMORY:-96}"
+        export QUEUE_MEMORY_LIMIT="${QUEUE_MEMORY_LIMIT:-128M}"
+        export QUEUE_MAX_JOBS="${QUEUE_MAX_JOBS:-500}"
+        export QUEUE_MAX_TIME="${QUEUE_MAX_TIME:-3600}"
+        validate_integer QUEUE_SLEEP "$QUEUE_SLEEP" 1
+        validate_integer QUEUE_MEMORY "$QUEUE_MEMORY" 1
+        validate_integer QUEUE_MAX_JOBS "$QUEUE_MAX_JOBS" 0
+        validate_integer QUEUE_MAX_TIME "$QUEUE_MAX_TIME" 0
+        ;;
+esac
+
 if [ "${APP_ENV:-production}" = "production" ] \
     && { [ "$role" = "reverb" ] || [ "${BROADCAST_CONNECTION:-}" = "reverb" ]; }; then
     missing_reverb_variables=""

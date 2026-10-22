@@ -21,26 +21,35 @@ class GetShopProductReviews
             ->latest()
             ->limit(50)
             ->get();
-        $reviewCounts = ShopProductReview::query()->whereBelongsTo($product, 'product');
-        $viewerReview = $this->eligibility->canManageOwnReview($viewer, $product)
-            ? ShopProductReview::query()
-                ->whereBelongsTo($product, 'product')
-                ->whereBelongsTo($viewer, 'customer')
-                ->with('customer:id,full_name,avatar_url')
-                ->first()
-            : null;
+        $reviewCounts = ShopProductReview::query()
+            ->whereBelongsTo($product, 'product')
+            ->selectRaw('COUNT(*) as total_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN reaction = ? THEN 1 ELSE 0 END), 0) as likes_count', [ShopReactionTypeEnum::Like->value])
+            ->selectRaw('COALESCE(SUM(CASE WHEN reaction = ? THEN 1 ELSE 0 END), 0) as dislikes_count', [ShopReactionTypeEnum::Dislike->value])
+            ->first();
+        $permissions = $this->eligibility->permissions($viewer, $product);
+        $viewerReview = null;
+
+        if ($permissions['can_manage']) {
+            $viewerReview = $reviews->firstWhere('customer_id', $viewer->getKey())
+                ?? ShopProductReview::query()
+                    ->whereBelongsTo($product, 'product')
+                    ->whereBelongsTo($viewer, 'customer')
+                    ->with('customer:id,full_name,avatar_url')
+                    ->first();
+        }
 
         return [
             'reviews' => $reviews->map(fn (ShopProductReview $review): array => $this->payload($review))->all(),
             'summary' => [
-                'total_count' => (clone $reviewCounts)->count(),
-                'likes_count' => (clone $reviewCounts)->where('reaction', ShopReactionTypeEnum::Like)->count(),
-                'dislikes_count' => (clone $reviewCounts)->where('reaction', ShopReactionTypeEnum::Dislike)->count(),
+                'total_count' => (int) $reviewCounts->total_count,
+                'likes_count' => (int) $reviewCounts->likes_count,
+                'dislikes_count' => (int) $reviewCounts->dislikes_count,
             ],
             'viewer_review' => $viewerReview instanceof ShopProductReview
                 ? $this->payload($viewerReview)
                 : null,
-            'can_review' => $this->eligibility->canReview($viewer, $product),
+            'can_review' => $permissions['can_review'],
         ];
     }
 

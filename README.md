@@ -123,6 +123,36 @@ Compose uses a dedicated SQLite/storage volume and local mail/media drivers. Con
 
 ## Render Free: API + worker cùng container, Reverb riêng
 
+### Cấu hình cho 0.5 CPU, 512 MB RAM và DB có độ trễ cao
+
+Docker mặc định giới hạn HTTP ở **1 luồng PHP khi `DEPLOY_ROLE=web-worker`**, hoặc **2 luồng khi `DEPLOY_ROLE=web`**. PHP dùng `memory_limit=128M`, OPcache 64 MB và tắt JIT. Go dùng `GOMAXPROCS=1`, `GOMEMLIMIT=64MiB`; đây là ngưỡng mềm của Go heap, không phải giới hạn RAM của cả container. HTTP nén gzip mức 1 để giảm CPU. Các giới hạn luồng theo hướng dẫn [FrankenPHP](https://frankenphp.dev/docs/performance/).
+
+Một queue worker dùng PHP tối đa 128 MB, tự khởi động lại giữa các job khi vượt ngưỡng 96 MB, sau 500 job hoặc sau 1 giờ. Worker ngủ 3 giây khi queue rỗng, heartbeat ghi mỗi 30 giây. Việc này giảm truy cập DB nền; job vừa đến lúc worker đang ngủ có thể chờ thêm gần 3 giây, ngoài độ trễ DB và thời gian xử lý. Ngưỡng recycle không ngắt job đang chạy; timeout vẫn là 60 giây, nhỏ hơn `retry_after=90`. Xem [queue workers](https://laravel.com/docs/13.x/queues#running-the-queue-worker).
+
+Entrypoint đặt các mặc định bên dưới; có thể ghi đè bằng biến môi trường:
+
+| Biến | `web-worker` | `web` / worker riêng |
+| --- | --- | --- |
+| `FRANKENPHP_NUM_THREADS` | `1` | `2` cho `web` |
+| `FRANKENPHP_MAX_THREADS` | bằng `NUM_THREADS` | bằng `NUM_THREADS` |
+| `QUEUE_SLEEP` | `3` | `3` cho worker |
+| `QUEUE_MEMORY` | `96` (MB, recycle giữa job) | `96` |
+| `QUEUE_MEMORY_LIMIT` | `128M` | `128M` |
+| `QUEUE_MAX_JOBS` | `500` | `500` |
+| `QUEUE_MAX_TIME` | `3600` (giây) | `3600` |
+
+`REFERENCE_CACHE_STORE=file` dành riêng cho dữ liệu tỉnh/phường, cache tối đa 24 giờ và dùng lại cho kiểm tra/định dạng địa chỉ. Sau khi cache nóng, các bước này không cần SQL tới bảng `addresses`. Khi cập nhật dữ liệu địa giới, chạy `php artisan cache:clear --store=file` trên từng API instance, hoặc đợi hết TTL. Filesystem tạm thời mất cache khi container bị thay thế; request tiếp theo tự tạo lại cache. Có thể chọn store khác qua biến này.
+
+Giữ `CACHE_STORE=database` khi API và worker ở các service khác nhau: khóa upload, scheduler, trạng thái online và heartbeat cần dùng chung. Nếu **chỉ có một API instance**, có thể đặt `CACHE_LIMITER_STORE=file` để rate limiter tránh chờ DB. `render.free.yaml` đã bật lựa chọn này cho API đơn; bỏ biến hoặc chuyển sang store chung trước khi tăng số API instance. Không dùng `array` làm cache production.
+
+Các API được giảm dữ liệu/truy vấn mà vẫn tính số liệu hiện tại: thống kê tương tác còn 4 truy vấn cho cả khách và người đăng nhập; thống kê đánh giá và thống kê đơn hàng mỗi nhóm dùng 1 truy vấn tổng hợp; badge tin nhắn/thông báo dùng chung 1 truy vấn. Catalog/home chỉ tải 1 biến thể phù hợp để hiển thị giá cho mỗi sản phẩm; trang chi tiết vẫn tải đầy đủ biến thể. Giá, tồn kho và điều kiện đặt hàng tiếp tục được kiểm tra khi ghi đơn.
+
+Sau khi cập nhật code, **rebuild và redeploy** image để áp dụng PHP/Caddy/Supervisor; chỉ chạy `config:cache` không áp dụng các cấu hình này. Không cần migration mới cho phần tối ưu. Với Render cấu hình thủ công, đặt `DEPLOY_ROLE=web-worker`, `REFERENCE_CACHE_STORE=file`, và `CACHE_LIMITER_STORE=file` khi API chỉ có một instance. Entrypoint tự đặt các giá trị còn lại và chạy `optimize`.
+
+Trước khi giải mã ảnh, backend ước lượng bộ nhớ cần dùng theo số điểm ảnh, dung lượng tệp và bộ nhớ PHP còn trống. Ảnh vượt ngân sách sẽ bị từ chối trước bước giải mã. Luồng tải ảnh qua trình duyệt trả lỗi validation yêu cầu giảm độ phân giải; các luồng upload khác giữ thông báo lỗi hiện có. Vì vậy ảnh camera lớn từng xử lý được ở 256 MB có thể bị từ chối ở 128 MB; giới hạn định dạng và số điểm ảnh tối đa vẫn được giữ. Đây là ước lượng bảo thủ, không bảo đảm toàn bộ native memory.
+
+Đây là cấu hình khởi điểm cho tài nguyên nhỏ, chưa phải kết quả benchmark ở quota thực. Cần theo dõi RAM toàn container, CPU throttling, độ trễ p95 và backlog queue với DB production. Không tăng số luồng hoặc worker trước khi đo RAM còn trống; xử lý ảnh camera lớn có thể tạo đỉnh RAM cao. Giới hạn bộ nhớ PHP không bao gồm toàn bộ bộ nhớ native và tiến trình nền. Đặt API và DB cùng region khi có thể để giảm thời gian mỗi lượt truy vấn.
+
 Nếu đang dùng **Free**, giữ hai Docker **Web Service** hiện tại: `deal-hay-backend` và `deal-hay-reverb`. API chạy thêm queue và scheduler bằng `DEPLOY_ROLE=web-worker`. Render không có Background Worker miễn phí; pre-deploy command chỉ có trên compute trả phí. Xem [Render Free](https://render.com/docs/free) và [pre-deploy command](https://render.com/docs/deploys#pre-deploy-command).
 
 ### 1. Sửa lỗi `Pusher ... auth_key ... null given`
@@ -321,6 +351,20 @@ Remove stale per-service Dashboard overrides for `CACHE_STORE`, `CACHE_PREFIX`, 
 The configured pre-deploy command and background worker require paid Render compute. For Free compute, use the two-service configuration and `render.free.yaml` described above.
 
 ## Vercel frontend
+
+### Upload nhiều ảnh và tiến độ
+
+Frontend thu nhỏ ảnh trên trình duyệt trước khi xin token xử lý: cạnh dài tối đa 1280 px, avatar 640 px; chỉ giải mã một ảnh cùng lúc và gửi tối đa hai ảnh đồng thời. Thumbnail xem trước cũng được thu nhỏ để tránh giữ nhiều ảnh camera đã giải mã trong RAM trình duyệt. Backend vẫn xác thực tệp, chuẩn hóa ảnh WebP tối đa 20 KB và kiểm tra ngân sách bộ nhớ.
+
+Một sản phẩm nhận tối đa 50 ảnh bổ sung, mỗi ảnh gốc tối đa 30 MB. Sau chuẩn hóa, biểu mẫu gửi các ảnh nhỏ tới server action để lưu. Danh sách ảnh gallery được thêm/xóa bằng truy vấn theo lô để giảm thời gian chờ DB; việc ghi ảnh tới R2 vẫn có thể kéo dài khi mạng chậm. Không tăng số worker/luồng PHP chỉ để tăng số ảnh tải đồng thời.
+
+Giao diện hiển thị phần trăm theo dữ liệu thực từ XHR, từng ảnh và cả đợt, kèm giai đoạn thu nhỏ/gửi/xử lý/lưu. Khi lỗi, biểu mẫu giữ lựa chọn để người dùng thử lại; các request ảnh còn lại của đợt được hủy. `CORS_MAX_AGE=600` cho phép trình duyệt dùng lại preflight 10 phút; danh sách origins và kiểm tra token vẫn giữ nguyên.
+
+### Trang Độ trễ trên header
+
+Header và menu mobile có liên kết **Độ trễ** tới `/diagnostics`, dành cho tài khoản đang đăng nhập. Nhấn **Đo độ trễ** để xem thời gian trình duyệt → Next.js, Next.js → API và các phép kiểm tra từ API tới database, cache, R2 và Reverb. Đây là thời gian yêu cầu ứng dụng, không phải ping ICMP. Các phép đo từng dịch vụ được dùng lại tối đa 15 giây theo `checked_at`; thời gian gọi HTTP được đo lại mỗi lần nhấn. Không có polling nền.
+
+`GET /api/diagnostics` yêu cầu Sanctum và tài khoản hoạt động, giới hạn 6 lần/phút/tài khoản. API chỉ truy vấn `SELECT 1`, đọc cache, gọi `HeadBucket` R2 và bắt tay WebSocket Reverb; không ghi/tải ảnh. R2 giới hạn một lần thử với connect timeout 2 giây, request timeout 3 giây. Endpoint chỉ đo các dịch vụ đã cấu hình, không nhận URL tùy ý, không trả hostname, khóa hay lỗi kết nối nội bộ. R2/realtime dùng local hoặc bị tắt sẽ được bỏ qua; lỗi dependency xuất hiện trong kết quả HTTP 200, độc lập endpoint readiness `/ready`.
 
 Chat và thông báo dùng một kết nối Echo/Reverb chung, giữ kết nối khi chuyển trang. Tin nhắn mới, trạng thái đã đọc và badge cập nhật theo sự kiện WebSocket; không có fallback tải lại trang mỗi 15 giây. Sau khi subscribe hoặc kết nối lại, frontend lấy một snapshot để bù dữ liệu bị lỡ. Heartbeat định kỳ chỉ cập nhật trạng thái online, không tải tin nhắn.
 

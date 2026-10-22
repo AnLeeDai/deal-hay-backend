@@ -16,6 +16,7 @@ use App\Http\Controllers\ProductDiscountCodeController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicShopController;
 use App\Http\Controllers\RealtimeConfigController;
+use App\Http\Controllers\ServerDiagnosticsController;
 use App\Http\Controllers\ShippingOfferController;
 use App\Http\Controllers\ShippingQuoteController;
 use App\Http\Controllers\ShopController;
@@ -62,6 +63,8 @@ Route::prefix('addresses')->name('addresses.')->group(function (): void {
 });
 
 Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
+    Route::get('/diagnostics', ServerDiagnosticsController::class)
+        ->middleware('throttle:diagnostics')->name('diagnostics');
     Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-offer/code', [ShippingOfferController::class, 'code'])
         ->scopeBindings()->middleware('throttle:60,1')->name('shops.products.shipping-offer.code');
     Route::post('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-offer/views', [ShippingOfferController::class, 'start'])

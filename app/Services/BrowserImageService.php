@@ -80,5 +80,11 @@ class BrowserImageService
         if (! $this->manager->driver->supports($mime)) {
             throw ValidationException::withMessages(['image' => 'Máy chủ hiện chưa hỗ trợ xử lý định dạng ảnh này. Vui lòng chọn JPG, PNG hoặc WEBP.']);
         }
+
+        try {
+            ImageService::assertMemoryBudget((int) $info[0], (int) $info[1], $size);
+        } catch (ImageDecoderException $exception) {
+            throw ValidationException::withMessages(['image' => $exception->getMessage()]);
+        }
     }
 }

@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Models\ChatMessage;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 class GetUserUnreadCounts
 {
@@ -14,7 +15,8 @@ class GetUserUnreadCounts
     public function handle(User $user): array
     {
         $userId = $user->getKey();
-        $unreadMessagesCount = ChatMessage::query()
+        $unreadMessages = ChatMessage::query()
+            ->selectRaw('COUNT(*)')
             ->whereNull('read_at')
             ->where('sender_id', '!=', $userId)
             ->whereHas('conversation', function (Builder $query) use ($userId): void {
@@ -23,12 +25,15 @@ class GetUserUnreadCounts
                         ->where('buyer_id', $userId)
                         ->orWhere('shop_owner_id', $userId);
                 });
-            })
-            ->count();
+            });
+        $counts = DB::query()
+            ->selectSub($unreadMessages, 'unread_messages_count')
+            ->selectSub($user->unreadNotifications()->reorder()->selectRaw('COUNT(*)'), 'unread_notifications_count')
+            ->first();
 
         return [
-            'unread_messages_count' => $unreadMessagesCount,
-            'unread_notifications_count' => $user->unreadNotifications()->count(),
+            'unread_messages_count' => (int) $counts->unread_messages_count,
+            'unread_notifications_count' => (int) $counts->unread_notifications_count,
         ];
     }
 }

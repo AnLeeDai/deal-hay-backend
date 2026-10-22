@@ -4,6 +4,7 @@ use App\Models\ShopProduct;
 use App\Models\ShopProductVariant;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 
 it('displays the effective initial variant price without replacing the inherited base price', function (array $variants, int $displayPrice): void {
     $shop = User::factory()->shopOwner()->create();
@@ -95,6 +96,56 @@ it('loads catalog variant prices in one query for multiple products', function (
     }
 
     expect($variantQueries)->toHaveCount(1);
+})->with(['home', 'shop']);
+
+it('loads at most one price variant per catalog product while preserving selection priority', function (string $page): void {
+    $shop = User::factory()->shopOwner()->create();
+    $cases = [
+        [50_000, 90_000, [
+            ['price' => 60_000, 'stock' => 2],
+            ['price' => 70_000, 'stock' => 0, 'is_default' => true],
+            ['price' => 90_000, 'stock' => 2, 'is_default' => true],
+        ]],
+        [50_000, 65_000, [
+            ['price' => 80_000, 'stock' => 0, 'is_default' => true],
+            ['price' => 65_000, 'stock' => 2],
+        ]],
+        [50_000, 78_000, [
+            ['price' => 61_000, 'stock' => 0],
+            ['price' => 78_000, 'stock' => 0, 'is_default' => true],
+        ]],
+        [51_000, 51_000, [
+            ['price' => 1_000, 'stock' => 2, 'is_default' => true, 'is_active' => false],
+            ['price' => 2_000, 'stock' => 2, 'is_default' => true, 'retired_at' => '2026-01-01 00:00:00'],
+        ]],
+        [52_000, 52_000, [
+            ['price' => 60_000, 'stock' => 2],
+            ['price' => null, 'stock' => 2, 'is_default' => true],
+        ]],
+    ];
+    $expected = [];
+    foreach ($cases as [$basePrice, $displayPrice, $variants]) {
+        $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['price' => $basePrice]);
+        $expected[$product->id] = $displayPrice;
+        foreach ($variants as $position => $variant) {
+            ShopProductVariant::factory()->for($product, 'product')->create(['position' => $position, ...$variant]);
+        }
+    }
+    $loadedVariants = 0;
+    $event = 'eloquent.retrieved: '.ShopProductVariant::class;
+    Event::listen($event, function () use (&$loadedVariants): void {
+        $loadedVariants++;
+    });
+
+    try {
+        $response = $this->getJson($page === 'home' ? '/api/' : '/api/shops/'.$shop->user_code)->assertOk();
+    } finally {
+        Event::forget($event);
+    }
+
+    $products = collect($response->json($page === 'home' ? 'products.data' : 'products'));
+    expect($products->pluck('display_price', 'id')->all())->toEqual($expected);
+    expect($loadedVariants)->toBe(4);
 })->with(['home', 'shop']);
 
 it('keeps the product presentation video available independently of central advertising', function (): void {

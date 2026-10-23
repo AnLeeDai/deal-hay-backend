@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Enums\UserRoleEnum;
 use App\Models\ShopCoupon;
+use App\Models\ShopProduct;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -32,7 +33,9 @@ class UpdateShopCouponRequest extends FormRequest
         $maximumDiscountValue = $this->input('discount_type') === 'percent' ? 100 : 999999999;
 
         return [
-            'code' => ['required', 'string', 'max:40', Rule::unique(ShopCoupon::class)->where('shop_owner_id', $this->user()?->getKey())->ignore($this->route('shopCoupon'))],
+            'code' => ['prohibited'],
+            'product_ids' => ['required', 'array', 'list', 'min:1', 'max:1000'],
+            'product_ids.*' => ['required', 'uuid', 'distinct', Rule::exists(ShopProduct::class, 'id')->where('shop_owner_id', $this->user()?->getKey())],
             'name' => ['required', 'string', 'max:120'],
             'discount_type' => ['required', Rule::in(['fixed', 'percent'])],
             'discount_value' => ['required', 'integer', 'min:1', 'max:'.$maximumDiscountValue],
@@ -43,10 +46,5 @@ class UpdateShopCouponRequest extends FormRequest
             'ends_at' => ['nullable', 'date', 'after:starts_at'],
             'is_active' => ['required', 'boolean'],
         ];
-    }
-
-    protected function prepareForValidation(): void
-    {
-        $this->merge(['code' => mb_strtoupper(trim((string) $this->input('code')))]);
     }
 }

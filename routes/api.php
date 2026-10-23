@@ -15,6 +15,7 @@ use App\Http\Controllers\PresenceController;
 use App\Http\Controllers\ProductDiscountCodeController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicShopController;
+use App\Http\Controllers\PublicShopCouponController;
 use App\Http\Controllers\RealtimeConfigController;
 use App\Http\Controllers\ServerDiagnosticsController;
 use App\Http\Controllers\ShippingOfferController;
@@ -28,6 +29,7 @@ use App\Http\Controllers\ShopProductPricingController;
 use App\Http\Controllers\ShopProductReviewController;
 use App\Http\Controllers\ShopReactionController;
 use App\Http\Controllers\ShopShippingSettingController;
+use App\Http\Controllers\ShopStocktakeController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -38,6 +40,7 @@ Route::get('/media/assets/{path}', [MediaGatewayController::class, 'asset'])
 Route::post('/media/browser/transform', [MediaGatewayController::class, 'browserTransform'])->name('media.browser.transform');
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::get('/shops/{shop:user_code}', [PublicShopController::class, 'show'])->name('shops.show');
+Route::get('/shops/{shop:user_code}/coupons', [PublicShopCouponController::class, 'index'])->name('shops.coupons.index');
 Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}', [PublicShopController::class, 'showProduct'])
     ->scopeBindings()
     ->name('shops.products.show');
@@ -118,6 +121,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
         ->name('presence.heartbeat');
     Route::get('/realtime/config', RealtimeConfigController::class)->name('realtime.config');
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::patch('/notifications/read-visible', [NotificationController::class, 'readVisible'])->name('notifications.read-visible');
     Route::patch('/notifications/read-all', [NotificationController::class, 'readAll'])->name('notifications.read-all');
     Route::patch('/notifications/{notification}/read', [NotificationController::class, 'read'])->name('notifications.read');
 
@@ -162,6 +166,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
             ->middleware('throttle:product-write')->name('shop.products.pricing.update');
         Route::delete('/shop/products/{shopProduct}', [ShopController::class, 'destroyProduct'])->name('shop.products.destroy');
         Route::patch('/shop/products/{shopProduct}/inventory', [ShopInventoryController::class, 'adjust'])->name('shop.products.inventory.adjust');
+        Route::get('/shop/stocktakes', [ShopStocktakeController::class, 'index'])->name('shop.stocktakes.index');
+        Route::post('/shop/stocktakes', [ShopStocktakeController::class, 'store'])->middleware('throttle:10,1')->name('shop.stocktakes.store');
+        Route::get('/shop/stocktakes/{stocktake}', [ShopStocktakeController::class, 'show'])->name('shop.stocktakes.show');
+        Route::post('/shop/stocktakes/{stocktake}/scan', [ShopStocktakeController::class, 'scan'])->middleware('throttle:240,1')->name('shop.stocktakes.scan');
+        Route::patch('/shop/stocktakes/{stocktake}/items/{item}', [ShopStocktakeController::class, 'updateItem'])->name('shop.stocktakes.items.update');
+        Route::post('/shop/stocktakes/{stocktake}/complete', [ShopStocktakeController::class, 'complete'])->name('shop.stocktakes.complete');
         Route::post('/shop/coupons', [ShopCouponController::class, 'store'])->name('shop.coupons.store');
         Route::patch('/shop/coupons/{shopCoupon}', [ShopCouponController::class, 'update'])->name('shop.coupons.update');
         Route::delete('/shop/coupons/{shopCoupon}', [ShopCouponController::class, 'destroy'])->name('shop.coupons.destroy');

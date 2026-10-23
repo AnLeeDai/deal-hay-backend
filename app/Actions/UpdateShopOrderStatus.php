@@ -50,6 +50,7 @@ class UpdateShopOrderStatus
                 'completed_at' => $nextStatus === 'completed' ? now() : null,
                 'cancelled_at' => $nextStatus === 'cancelled' ? now() : null,
             ]);
+            app(NotifyShopOrder::class)->statusUpdated($order);
         }, attempts: 5);
     }
 

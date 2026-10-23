@@ -7,7 +7,6 @@ use App\Mail\EmailChangeVerificationCodeMail;
 use App\Models\ShopProfileChangeLog;
 use App\Models\User;
 use App\Notifications\ShopProfileUpdatedNotification;
-use App\Services\NotificationService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -20,8 +19,6 @@ use Throwable;
 class UpdateShopProfile
 {
     private const int EMAIL_CHANGE_CODE_TTL_MINUTES = 10;
-
-    public function __construct(private readonly NotificationService $notifications) {}
 
     /** @param array<string, mixed> $validated */
     public function handle(User $shopOwner, array $validated): void
@@ -167,11 +164,6 @@ class UpdateShopProfile
         User::query()->where('role', UserRoleEnum::ADMINISTRATOR)->each(function (User $admin) use ($changeLog, $shopOwner): void {
             $notification = new ShopProfileUpdatedNotification($shopOwner, $changeLog);
             $admin->notify($notification);
-            $storedNotification = $admin->notifications()->find($notification->id);
-
-            if ($storedNotification !== null) {
-                $this->notifications->broadcast($storedNotification);
-            }
         });
     }
 

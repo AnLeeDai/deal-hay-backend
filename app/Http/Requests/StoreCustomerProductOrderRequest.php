@@ -16,6 +16,9 @@ class StoreCustomerProductOrderRequest extends FormRequest
         if (is_string($this->input('discount_code'))) {
             $this->merge(['discount_code' => strtoupper(trim($this->input('discount_code')))]);
         }
+        if (is_string($this->input('shop_coupon_code'))) {
+            $this->merge(['shop_coupon_code' => strtoupper(trim($this->input('shop_coupon_code')))]);
+        }
         if (is_string($this->input('shipping_discount_code'))) {
             $this->merge(['shipping_discount_code' => strtoupper(trim($this->input('shipping_discount_code')))]);
         }
@@ -45,6 +48,7 @@ class StoreCustomerProductOrderRequest extends FormRequest
             'shipping_ward_code' => ['required', 'integer', new ValidWardInProvince($this->input('shipping_province_code'), true)],
             'quoted_shipping_fee' => ['nullable', 'integer', 'min:0', 'max:999999999'],
             'shipping_discount_code' => ['nullable', 'string', 'size:32'],
+            'shop_coupon_code' => ['nullable', 'string', 'max:40'],
             'note' => ['nullable', 'string', 'max:2000'],
             'advertisement_view_id' => ['nullable', 'uuid'],
             'discount_code' => ['nullable', 'string', 'size:32', Rule::prohibitedIf($this->filled('advertisement_view_id') || $this->filled('discount_codes'))],

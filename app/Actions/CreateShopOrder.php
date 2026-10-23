@@ -151,7 +151,12 @@ class CreateShopOrder
 
                 $subtotal = (int) $items->sum('subtotal');
                 $coupon = $this->resolveCoupon($shopOwner, $data['coupon_code'] ?? null, $subtotal);
-                $discount = $coupon?->discountFor($subtotal) ?? 0;
+                $eligibleSubtotal = $coupon ? (int) $items->filter(fn (array $item): bool => $coupon->products()->whereKey($item['product']->getKey())->exists()
+                )->sum('subtotal') : 0;
+                if ($coupon && ($eligibleSubtotal === 0 || ! $coupon->isAvailable($eligibleSubtotal))) {
+                    throw ValidationException::withMessages(['coupon_code' => 'Đơn hàng chưa có sản phẩm được gán ưu đãi hoặc chưa đủ giá trị áp dụng.']);
+                }
+                $discount = $coupon?->discountFor($eligibleSubtotal) ?? 0;
                 $order = ShopOrder::query()->create([
                     'shop_owner_id' => $shopOwner->getKey(),
                     'idempotency_key' => $idempotencyKey,
@@ -194,6 +199,7 @@ class CreateShopOrder
                 }
 
                 $coupon?->increment('used_count');
+                app(NotifyShopOrder::class)->created($order);
             }, attempts: 5);
         } catch (UniqueConstraintViolationException $exception) {
             $existingOrder = $this->findIdempotentOrder($shopOwner, $idempotencyKey);

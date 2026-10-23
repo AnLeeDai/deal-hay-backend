@@ -4,8 +4,10 @@ use App\Models\User;
 use App\Services\BrowserUploadService;
 use App\Services\ImageService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
 it('uses a browser grant once to normalize the declared image', function (): void {
     $user = User::factory()->customer()->create();
@@ -62,4 +64,44 @@ it('refuses a browser grant after its two minute lifetime', function (): void {
     $this->travel(121)->seconds();
 
     expect(fn () => $service->prepare($grant['token'], $file))->toThrow(HttpException::class);
+});
+
+it('returns a retryable error when the same browser grant is already locked', function (): void {
+    $user = User::factory()->customer()->create();
+    $file = UploadedFile::fake()->image('photo.png', 64, 64);
+    $service = app(BrowserUploadService::class);
+    $grant = $service->grant((string) $user->getKey(), $file->getSize(), 'product');
+    $lock = Cache::lock('browser-upload:'.hash('sha256', $grant['token']).':lock', 10);
+    expect($lock->get())->toBeTrue();
+
+    try {
+        $service->prepare($grant['token'], $file);
+        $this->fail('A busy grant should return a retryable error.');
+    } catch (ServiceUnavailableHttpException $exception) {
+        expect($exception->getStatusCode())->toBe(503);
+        expect($exception->getHeaders()['Retry-After'])->toBe(2);
+    } finally {
+        $lock->release();
+    }
+
+    expect(getimagesizefromstring($service->prepare($grant['token'], $file))['mime'])->toBe('image/webp');
+});
+
+it('isolates account quota locks and returns a retryable error instead of an unhandled failure', function (): void {
+    $first = User::factory()->customer()->create();
+    $second = User::factory()->customer()->create();
+    $service = app(BrowserUploadService::class);
+    $lock = Cache::lock('dealhay:browser-upload-quota:'.$first->getKey().':lock', 10);
+    expect($lock->get())->toBeTrue();
+
+    try {
+        expect($service->grant((string) $second->getKey(), 100, 'product'))->toHaveKeys(['url', 'token']);
+        $service->grant((string) $first->getKey(), 100, 'product');
+        $this->fail('A busy account quota should return a retryable error.');
+    } catch (ServiceUnavailableHttpException $exception) {
+        expect($exception->getStatusCode())->toBe(503);
+        expect($exception->getHeaders()['Retry-After'])->toBe(2);
+    } finally {
+        $lock->release();
+    }
 });

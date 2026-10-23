@@ -7,6 +7,7 @@ use App\Models\ProductAdView;
 use App\Models\ProductDiscountCode;
 use App\Models\RewardedTaskConversion;
 use App\Models\ShippingDiscountCode;
+use App\Models\ShopCoupon;
 use App\Models\ShopOrder;
 use App\Models\ShopProduct;
 use App\Models\ShopProductVariant;
@@ -50,6 +51,9 @@ class CreateCustomerProductOrder
         }
         if (filled($data['shipping_discount_code'] ?? null)) {
             $fingerprintData['shipping_discount_code'] = $data['shipping_discount_code'];
+        }
+        if (filled($data['shop_coupon_code'] ?? null)) {
+            $fingerprintData['shop_coupon_code'] = $data['shop_coupon_code'];
         }
         $fingerprint = hash('sha256', json_encode($fingerprintData, JSON_THROW_ON_ERROR));
 
@@ -126,6 +130,20 @@ class CreateCustomerProductOrder
                 }
             }
 
+            $shopCoupon = null;
+            if (filled($data['shop_coupon_code'] ?? null)) {
+                $shopCoupon = ShopCoupon::query()->where('shop_owner_id', $shop->getKey())
+                    ->where('code', $data['shop_coupon_code'])->lockForUpdate()->first();
+                if (! $shopCoupon || ! $shopCoupon->isAvailable($subtotal)
+                    || ! $shopCoupon->products()->whereKey($product->getKey())->exists()) {
+                    throw ValidationException::withMessages(['shop_coupon_code' => 'Ưu đãi từ shop không áp dụng cho sản phẩm này, đã hết hạn, hết lượt hoặc chưa đủ giá trị đơn hàng.']);
+                }
+                $shopDiscount = $shopCoupon->discountFor($remaining);
+                if ($shopDiscount === 0) {
+                    throw ValidationException::withMessages(['shop_coupon_code' => 'Ưu đãi từ shop không làm giảm thêm tiền hàng. Vui lòng bỏ chọn ưu đãi này.']);
+                }
+                $remaining -= $shopDiscount;
+            }
             $discount = $subtotal - $remaining;
             $shippingCode = null;
             $shippingDiscount = 0;
@@ -147,6 +165,7 @@ class CreateCustomerProductOrder
             $order = ShopOrder::query()->create([
                 'shop_owner_id' => $shop->getKey(),
                 'customer_id' => $customer->getKey(),
+                'shop_coupon_id' => $shopCoupon?->getKey(),
                 'idempotency_key' => $data['idempotency_key'],
                 'request_fingerprint' => $fingerprint,
                 'order_number' => 'DH-'.now()->format('Ymd').'-'.Str::upper(Str::random(10)),
@@ -180,6 +199,8 @@ class CreateCustomerProductOrder
                 $reward['code']->update(['shop_order_id' => $order->getKey(), 'used_at' => now()]);
             }
             $shippingCode?->update(['shop_order_id' => $order->getKey(), 'used_at' => now()]);
+            $shopCoupon?->increment('used_count');
+            app(NotifyShopOrder::class)->created($order);
 
             return $order;
         }, attempts: 5);

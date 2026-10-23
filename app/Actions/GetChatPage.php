@@ -28,6 +28,10 @@ class GetChatPage
         $messages = null;
 
         if ($selected !== null) {
+            $selected->setAttribute(
+                'unread_count',
+                $conversations->firstWhere('id', (string) $selected->getKey())['unread_count'] ?? 0,
+            );
             $messages = $this->messageQuery($selected)->cursorPaginate(
                 $this->messageLimit($messageLimit),
             );

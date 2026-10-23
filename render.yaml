@@ -136,7 +136,7 @@ envVarGroups:
       - key: QUEUE_CONNECTION
         value: database
       - key: QUEUE_NAMES
-        value: realtime,images,default
+        value: images,default
       - key: SESSION_DRIVER
         value: database
       - key: MAIL_MAILER

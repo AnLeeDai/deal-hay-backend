@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable(['shop_owner_id', 'code', 'name', 'discount_type', 'discount_value', 'minimum_order_amount', 'maximum_discount_amount', 'usage_limit', 'used_count', 'starts_at', 'ends_at', 'is_active'])]
@@ -42,12 +43,17 @@ class ShopCoupon extends Model
         return $this->hasMany(ShopOrder::class);
     }
 
+    public function products(): BelongsToMany
+    {
+        return $this->belongsToMany(ShopProduct::class, 'shop_coupon_product');
+    }
+
     public function isAvailable(int $subtotal): bool
     {
         return $this->is_active
             && $subtotal >= $this->minimum_order_amount
             && ($this->usage_limit === null || $this->used_count < $this->usage_limit)
-            && ($this->starts_at === null || $this->starts_at->isPast())
+            && ($this->starts_at === null || $this->starts_at->lessThanOrEqualTo(now()))
             && ($this->ends_at === null || $this->ends_at->isFuture());
     }
 

@@ -67,7 +67,8 @@ esac
 
 case "$role" in
     worker|web-worker)
-        export QUEUE_NAMES="${QUEUE_NAMES:-realtime,images,default}"
+        export DB_OUTBOX_QUEUE="${DB_OUTBOX_QUEUE:-realtime}"
+        export QUEUE_NAMES="${QUEUE_NAMES:-images,default}"
         export QUEUE_SLEEP="${QUEUE_SLEEP:-3}"
         export QUEUE_MEMORY="${QUEUE_MEMORY:-96}"
         export QUEUE_MEMORY_LIMIT="${QUEUE_MEMORY_LIMIT:-128M}"

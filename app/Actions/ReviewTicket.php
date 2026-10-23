@@ -11,7 +11,6 @@ use App\Models\Ticket;
 use App\Models\User;
 use App\Notifications\TicketReviewedNotification;
 use App\Services\AddressService;
-use App\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
@@ -19,8 +18,6 @@ use Throwable;
 
 class ReviewTicket
 {
-    public function __construct(private readonly NotificationService $notifications) {}
-
     /** @param array{status: string, admin_note?: string|null} $data */
     public function handle(Ticket $ticket, User $admin, array $data): Ticket
     {
@@ -130,12 +127,6 @@ class ReviewTicket
             } catch (Throwable $throwable) {
                 report($throwable);
             }
-        }
-
-        $storedNotification = $ticket->user->notifications()->find($notification->id);
-
-        if ($storedNotification !== null) {
-            $this->notifications->broadcast($storedNotification);
         }
     }
 }

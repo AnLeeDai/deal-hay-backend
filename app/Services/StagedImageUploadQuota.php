@@ -8,6 +8,7 @@ use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
 class StagedImageUploadQuota
 {
@@ -77,7 +78,7 @@ class StagedImageUploadQuota
                 ], max(1, (int) $quota['expires_at'] - $now));
             });
         } catch (LockTimeoutException $exception) {
-            throw new RuntimeException('Không thể giữ khóa hạn mức tải ảnh.', previous: $exception);
+            throw new ServiceUnavailableHttpException(2, 'Phiên tải ảnh đang bận. Vui lòng thử lại sau ít giây.', $exception);
         }
     }
 
@@ -131,7 +132,7 @@ class StagedImageUploadQuota
                 ], max(1, (int) $quota['expires_at'] - $now));
             });
         } catch (LockTimeoutException $exception) {
-            throw new RuntimeException('Không thể giữ khóa hạn mức tải ảnh.', previous: $exception);
+            throw new ServiceUnavailableHttpException(2, 'Phiên tải ảnh đang bận. Vui lòng thử lại sau ít giây.', $exception);
         }
     }
 

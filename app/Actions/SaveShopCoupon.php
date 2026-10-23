@@ -4,8 +4,12 @@ namespace App\Actions;
 
 use App\Enums\UserRoleEnum;
 use App\Models\ShopCoupon;
+use App\Models\ShopProduct;
 use App\Models\User;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class SaveShopCoupon
 {
@@ -17,19 +21,30 @@ class SaveShopCoupon
             403,
         );
 
-        if ($coupon === null) {
-            return $shopOwner->shopCoupons()->create($data);
-        }
-
         return DB::transaction(function () use ($coupon, $data, $shopOwner): ShopCoupon {
-            $lockedCoupon = ShopCoupon::query()
-                ->lockForUpdate()
-                ->findOrFail($coupon->getKey());
+            $productIds = $data['product_ids'] ?? [];
+            $ownedProducts = ShopProduct::query()->where('shop_owner_id', $shopOwner->getKey())
+                ->whereKey($productIds)->orderBy('id')->lockForUpdate()->pluck('id');
+            if ($ownedProducts->count() !== count($productIds) || $ownedProducts->isEmpty()) {
+                throw ValidationException::withMessages(['product_ids' => 'Vui lòng chọn sản phẩm thuộc cửa hàng của bạn.']);
+            }
+            $attributes = Arr::except($data, ['code', 'product_ids']);
+            if ($coupon === null) {
+                $id = (string) Str::uuid();
+                $lockedCoupon = new ShopCoupon($attributes);
+                $lockedCoupon->id = $id;
+                $lockedCoupon->code = 'SHOP'.strtoupper(str_replace('-', '', $id));
+                $lockedCoupon->shop_owner_id = $shopOwner->getKey();
+                $lockedCoupon->save();
+            } else {
+                $lockedCoupon = ShopCoupon::query()->lockForUpdate()->findOrFail($coupon->getKey());
+                abort_unless($lockedCoupon->shop_owner_id === $shopOwner->getKey(), 403);
+                $lockedCoupon->update($attributes);
+            }
 
-            abort_unless($lockedCoupon->shop_owner_id === $shopOwner->getKey(), 403);
-            $lockedCoupon->update($data);
+            $lockedCoupon->products()->sync($productIds);
 
-            return $lockedCoupon;
+            return $lockedCoupon->load('products:id,name,slug');
         }, attempts: 5);
     }
 }

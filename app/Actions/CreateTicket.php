@@ -9,15 +9,12 @@ use App\Enums\UserRoleEnum;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Notifications\NewTicketNotification;
-use App\Services\NotificationService;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class CreateTicket
 {
-    public function __construct(private readonly NotificationService $notifications) {}
-
     /** @param array<string, mixed> $data */
     public function handle(string $userId, array $data, ?string $sourceUrl): Ticket
     {
@@ -60,11 +57,6 @@ class CreateTicket
         User::query()->where('role', UserRoleEnum::ADMINISTRATOR)->each(function (User $admin) use ($ticket): void {
             $notification = new NewTicketNotification($ticket);
             $admin->notify($notification);
-            $storedNotification = $admin->notifications()->find($notification->id);
-
-            if ($storedNotification !== null) {
-                $this->notifications->broadcast($storedNotification);
-            }
         });
     }
 

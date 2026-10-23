@@ -33,8 +33,6 @@ class ChatController extends Controller
 
     public function show(ShowChatRequest $request, ChatConversation $conversation): JsonResponse
     {
-        $this->markConversationRead->handle($conversation, $request->user());
-
         return response()->json($this->getChatPage->handle(
             $request->user(),
             $conversation,

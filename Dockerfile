@@ -70,7 +70,7 @@ ENV APP_ENV=production \
     PORT=10000 \
     REFERENCE_CACHE_STORE=file \
     REVERB_SERVER_HOST=0.0.0.0 \
-    QUEUE_NAMES=realtime,images,default
+    QUEUE_NAMES=images,default
 
 USER app
 

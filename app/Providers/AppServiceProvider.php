@@ -3,11 +3,14 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Services\NotificationService;
 use App\Services\OutboxWorkerHealth;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Notifications\ResetPassword as ResetPasswordNotification;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Events\DiagnosingHealth;
+use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
@@ -31,6 +34,11 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+        Event::listen(NotificationSent::class, function (NotificationSent $event): void {
+            if ($event->channel === 'database' && $event->response instanceof DatabaseNotification) {
+                app(NotificationService::class)->broadcast($event->response);
+            }
+        });
         $this->configureOutboxWorkerHeartbeat();
         $this->configureProductionHealthChecks();
         $this->configureDiagnosticsQueryTiming();

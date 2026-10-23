@@ -40,7 +40,7 @@ Liên kết nhóm với API và worker gửi mail. Trong **Environment** của t
 
 Thiếu `MAIL_MAILER` sẽ dùng mặc định `log`: API có thể báo đã gửi nhưng email chỉ được ghi vào log. `MAIL_MAILER=resend` sử dụng HTTPS API; không cần `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`. Render Free chặn các cổng SMTP 25, 465 và 587, nên dùng Resend API cho cấu hình này. Xem [giới hạn Render Free](https://render.com/docs/free).
 
-Mã đăng nhập admin, mã đổi email và liên kết đặt lại mật khẩu được gửi trực tiếp. Email thông báo đổi mật khẩu thành công và khóa/mở khóa tài khoản vẫn cần worker xử lý queue `default`; trên Render Free, dùng `DEPLOY_ROLE=web-worker` và `QUEUE_NAMES=realtime,images,default` cho API như hướng dẫn bên dưới. Nếu mail vẫn lỗi sau khi deploy, kiểm tra log API/worker và Resend Dashboard để phân biệt API key không hợp lệ, domain chưa xác minh hay lỗi giao thư.
+Mã đăng nhập admin, mã đổi email và liên kết đặt lại mật khẩu được gửi trực tiếp. Email thông báo đổi mật khẩu thành công và khóa/mở khóa tài khoản vẫn cần worker xử lý queue `default`; trên Render Free, dùng `DEPLOY_ROLE=web-worker` và `QUEUE_NAMES=images,default` cho API như hướng dẫn bên dưới. Nếu mail vẫn lỗi sau khi deploy, kiểm tra log API/worker và Resend Dashboard để phân biệt API key không hợp lệ, domain chưa xác minh hay lỗi giao thư.
 
 ## Dùng một bucket R2 cho ảnh và tin nhắn
 
@@ -190,7 +190,7 @@ DB_CONNECTION=mysql
 CACHE_STORE=database
 CACHE_PREFIX=deal-hay-cache
 QUEUE_CONNECTION=database
-QUEUE_NAMES=realtime,images,default
+QUEUE_NAMES=images,default
 SESSION_DRIVER=database
 BROADCAST_CONNECTION=reverb
 MAIL_MAILER=resend
@@ -291,7 +291,7 @@ DB_URL=mysql://USER:PASSWORD@HOST:PORT/DATABASE
 CACHE_STORE=database
 CACHE_PREFIX=deal-hay-cache
 QUEUE_CONNECTION=database
-QUEUE_NAMES=realtime,images,default
+QUEUE_NAMES=images,default
 SESSION_DRIVER=database
 BROADCAST_CONNECTION=reverb
 ```
@@ -317,7 +317,7 @@ Redeploy all three services after updating environment variables. The API's `/up
 
 Check `https://deal-hay-backend.onrender.com/ready` after deploying. It returns HTTP `200` with `status: ok` when database, cache, outbox worker, and Reverb checks pass, or HTTP `503` with `status: degraded` and the failed checks. Keep Render's API health check at `/up` so a worker/realtime outage does not prevent the API from deploying.
 
-If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPLOY_ROLE=worker`, and confirm its `DB_URL`, `CACHE_STORE`, and `CACHE_PREFIX` match the API. The supervised queue command is `php artisan queue:work database_outbox --queue=realtime,images,default`; the realtime queue must be included for heartbeat recording. A worker started on the ordinary `database` queue connection does not record this outbox heartbeat. A stopped worker is reported within two minutes. If `reverb` fails, check the publisher hostname/port and matching Reverb credentials/origins.
+If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPLOY_ROLE=worker`, and confirm its `DB_URL`, `CACHE_STORE`, and `CACHE_PREFIX` match the API. Supervisor runs a dedicated `realtime` worker (`php artisan queue:work database_outbox --queue=realtime --sleep=0.1`) alongside the `images,default` worker, so image processing does not delay notifications or chat. Set `DB_OUTBOX_QUEUE` consistently if using a different realtime queue name. The realtime worker records the outbox heartbeat; a worker started on the ordinary `database` queue connection does not. A stopped worker is reported within two minutes. If `reverb` fails, check the publisher hostname/port and matching Reverb credentials/origins.
 
 ### Deploy with the Blueprint
 
@@ -379,6 +379,16 @@ NEXT_PUBLIC_API=https://your-api-host.onrender.com/api
 ```
 
 The frontend reads this URL from a `server-only` module. Next.js replaces `NEXT_PUBLIC_API` at build time, so changing it requires a new deployment. No backend credential belongs in this value.
+
+## Coupon sản phẩm, kiểm kê và tải ảnh
+
+Khi triển khai bản cập nhật này, chạy `php artisan migrate --force`, triển khai lại frontend và khởi động lại các tiến trình Supervisor để nạp worker realtime riêng. Với Render, dùng quy trình deploy đã mô tả phía trên; cập nhật biến `QUEUE_NAMES=images,default` trong Dashboard nếu đang đặt giá trị cũ. Giữ `DB_OUTBOX_QUEUE=realtime` thống nhất giữa API và worker, cùng cấu hình Reverb đang dùng.
+
+Shop tạo coupon bằng tên hiển thị và chọn sản phẩm áp dụng; mã do hệ thống sinh và không thể sửa. Người mua xem **Ưu đãi từ shop** tại trang shop và chọn coupon trong checkout. Coupon có sẵn từ trước bản cập nhật cần được shop mở sửa và gán sản phẩm trước khi hiển thị cho người mua.
+
+Trong **Quản lý shop → Kho hàng**, chọn sản phẩm/biến thể và số tem để in QR (tem 60 × 32 mm, bố trí A4). Mở phiên kiểm kê rồi quét bằng máy quét có Enter hoặc camera trên HTTPS. Mỗi lượt quét cộng vào thực đếm; có thể sửa trực tiếp số lượng và xuất CSV. Khi chốt, chọn lưu biên bản hoặc cập nhật tồn theo số thực đếm. Tồn và lịch sử biến động phải còn khớp mốc đầu phiên để cập nhật, tránh ghi đè đơn hàng phát sinh trong lúc kiểm kê. Mã lạ được ghi riêng và không tự tạo hàng hóa. Hàng chưa đếm có thực đếm bằng 0.
+
+Tạo sản phẩm chuẩn bị tối đa 50 ảnh thư viện cùng một ảnh chính ở trình duyệt, khai báo một lô rồi tải tối đa hai ảnh đồng thời. Request lưu sản phẩm chỉ gửi mã ảnh đã chuẩn bị. Token ảnh thuộc từng tài khoản và có thể retry khi lượt tải đang bận; không gửi toàn bộ thư viện ảnh trong một request lưu sản phẩm.
 
 ## Useful commands
 

@@ -20,7 +20,7 @@ class ShopCouponFactory extends Factory
     {
         return [
             'shop_owner_id' => User::factory()->shopOwner(),
-            'code' => fake()->unique()->bothify('SALE####??'),
+            'code' => strtoupper(fake()->unique()->bothify('SALE####??')),
             'name' => fake()->words(3, true),
             'discount_type' => 'percent',
             'discount_value' => 10,

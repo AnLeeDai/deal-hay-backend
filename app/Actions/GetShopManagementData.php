@@ -120,9 +120,10 @@ class GetShopManagementData
     /** @return list<array<string, mixed>> */
     private function coupons(User $shopOwner): array
     {
-        return $shopOwner->shopCoupons()->latest()->get()->map(fn ($coupon): array => [
+        return $shopOwner->shopCoupons()->with('products:id,name,slug')->latest()->get()->map(fn ($coupon): array => [
             'id' => (string) $coupon->id,
             'code' => (string) $coupon->code,
+            'product_ids' => $coupon->products->modelKeys(),
             'name' => (string) $coupon->name,
             'discount_type' => (string) $coupon->discount_type,
             'discount_value' => (int) $coupon->discount_value,

@@ -39,4 +39,16 @@ class NotificationController extends Controller
 
         return response()->json(['message' => 'Đã đánh dấu toàn bộ thông báo là đã đọc.']);
     }
+
+    public function readVisible(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'notification_ids' => ['required', 'array', 'min:1', 'max:50'],
+            'notification_ids.*' => ['required', 'uuid', 'distinct'],
+        ]);
+        $user = $request->user();
+        $this->notifications->markVisibleAsRead($user, $data['notification_ids']);
+
+        return response()->json(['message' => 'Đã cập nhật thông báo đã xem.']);
+    }
 }

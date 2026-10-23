@@ -8,14 +8,11 @@ use App\Enums\UserRoleEnum;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Notifications\NewTicketNotification;
-use App\Services\NotificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class RequestShopOwnerUpgrade
 {
-    public function __construct(private readonly NotificationService $notifications) {}
-
     /** @param array{full_name: string, shop_name: string, email: string, shop_email: string, phone_number: string, shop_phone_number: string, province: string, ward: string, address_detail: string, message: string} $data */
     public function handle(User $user, array $data, ?string $sourceUrl): Ticket
     {
@@ -65,11 +62,6 @@ class RequestShopOwnerUpgrade
         User::query()->where('role', UserRoleEnum::ADMINISTRATOR)->each(function (User $admin) use ($ticket): void {
             $notification = new NewTicketNotification($ticket);
             $admin->notify($notification);
-            $storedNotification = $admin->notifications()->find($notification->id);
-
-            if ($storedNotification !== null) {
-                $this->notifications->broadcast($storedNotification);
-            }
         });
     }
 }

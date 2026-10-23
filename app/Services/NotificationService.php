@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Events\UserNotificationCreatedEvent;
+use App\Events\UserNotificationsReadEvent;
 use App\Models\User;
 use App\Support\NotificationPayload;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class NotificationService
@@ -28,12 +30,35 @@ class NotificationService
             403,
         );
 
-        $notification->markAsRead();
+        $this->markVisibleAsRead($user, [(string) $notification->getKey()]);
     }
 
     public function markAllAsRead(User $user): void
     {
-        $user->unreadNotifications()->update(['read_at' => now()]);
+        $this->markVisibleAsRead($user);
+    }
+
+    /** @param list<string>|null $notificationIds */
+    public function markVisibleAsRead(User $user, ?array $notificationIds = null): void
+    {
+        DB::transaction(function () use ($user, $notificationIds): void {
+            $notifications = $user->unreadNotifications()
+                ->when($notificationIds !== null, fn ($query) => $query->whereKey($notificationIds))
+                ->select('id')->lockForUpdate()->get();
+            if ($notifications->isEmpty()) {
+                return;
+            }
+
+            $readAt = now();
+            foreach (array_chunk($notifications->modelKeys(), 100) as $ids) {
+                $user->unreadNotifications()->whereKey($ids)->update(['read_at' => $readAt]);
+                UserNotificationsReadEvent::dispatch(
+                    (string) $user->getKey(),
+                    array_map('strval', $ids),
+                    $readAt->toIso8601String(),
+                );
+            }
+        }, attempts: 5);
     }
 
     public function broadcast(DatabaseNotification $notification): void

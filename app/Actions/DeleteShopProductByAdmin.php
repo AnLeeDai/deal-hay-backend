@@ -7,7 +7,6 @@ use App\Models\ShopProduct;
 use App\Models\User;
 use App\Notifications\ShopProductDeletedByAdminNotification;
 use App\Services\MediaClient;
-use App\Services\NotificationService;
 use App\Support\AdminShopProductPayload;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -15,7 +14,6 @@ use Illuminate\Support\Str;
 class DeleteShopProductByAdmin
 {
     public function __construct(
-        private readonly NotificationService $notifications,
         private readonly MediaClient $cleanup,
     ) {}
 
@@ -42,11 +40,5 @@ class DeleteShopProductByAdmin
             $this->cleanup->deleteLater($imagePaths);
             $shop->notify($deletedNotification);
         });
-
-        $notification = $shop->notifications()->find($deletedNotification->id);
-
-        if ($notification !== null) {
-            $this->notifications->broadcast($notification);
-        }
     }
 }

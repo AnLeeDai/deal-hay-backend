@@ -4,10 +4,12 @@ namespace App\Services;
 
 use App\Enums\ImagePurposeEnum;
 use App\Models\User;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
 class BrowserUploadService
 {
@@ -33,7 +35,11 @@ class BrowserUploadService
     public function prepare(string $token, UploadedFile $file): string
     {
         $key = 'browser-upload:'.hash('sha256', $token);
-        $grant = Cache::lock($key.':lock', 5)->block(2, fn () => Cache::pull($key));
+        try {
+            $grant = Cache::lock($key.':lock', 5)->block(2, fn () => Cache::pull($key));
+        } catch (LockTimeoutException $exception) {
+            throw new ServiceUnavailableHttpException(2, 'Phiên tải ảnh đang được xử lý. Vui lòng thử lại sau ít giây.', $exception);
+        }
         abort_unless(is_array($grant), 401);
         if ($file->getSize() !== $grant['size']) {
             throw ValidationException::withMessages(['image' => 'Kích thước ảnh không khớp với phiên tải lên.']);

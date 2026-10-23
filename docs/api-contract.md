@@ -39,6 +39,7 @@ Successful responses also include fresh `request: { duration_ms, database_querie
 | POST | `/shop-owner-upgrade-requests` | Bearer | `full_name`, `shop_name`, `email`, `shop_email`, `phone_number`, `shop_phone_number`, `province`, `ward`, `address_detail`, `message` | `201 { message, data }` |
 | GET | `/notifications` | Bearer | `page?` | `{ notification_page }` paginator |
 | PATCH | `/notifications/read-all` | Bearer | none | `{ message }` |
+| PATCH | `/notifications/read-visible` | Bearer | `notification_ids`: up to 50 UUIDs | `{ message }`; only owned unread notifications change; private `notifications.read` event synchronizes tabs |
 | PATCH | `/notifications/{notification}/read` | Bearer | none | `{ message }` |
 | POST | `/presence/heartbeat` | Bearer | `conversation_id?` | `{ ok, expires_in, server_time }` |
 
@@ -87,9 +88,16 @@ Successful responses also include fresh `request: { duration_ms, database_querie
 | PATCH | `/private/shop/products/{productId}/status` | Bearer shop owner | `is_active` | `{ message, data }` |
 | DELETE | `/private/shop/products/{productId}` | Bearer shop owner | none | `{ message }` |
 | PATCH | `/private/shop/products/{productId}/inventory` | Bearer shop owner | `variant_id?`, `quantity_delta`, `note?` | `{ message, data }` |
-| POST | `/private/shop/coupons` | Bearer shop owner | Coupon payload from source request (`code`, `discount_type`, `discount_value`, `minimum_order_value?`, `starts_at?`, `ends_at?`, `usage_limit?`, `is_active`) | `201 { message, data }` |
-| PATCH | `/private/shop/coupons/{couponId}` | Bearer shop owner | Same coupon payload | `{ message, data }` |
+| POST | `/private/shop/coupons` | Bearer shop owner | `name`, `product_ids` (required owned products), `discount_type`, `discount_value`, `minimum_order_amount?`, `maximum_discount_amount?`, `starts_at?`, `ends_at?`, `usage_limit?`, `is_active?` | `201 { message, data }`; code is system-generated |
+| PATCH | `/private/shop/coupons/{couponId}` | Bearer shop owner | Same coupon payload; code is immutable | `{ message, data }` |
 | DELETE | `/private/shop/coupons/{couponId}` | Bearer shop owner | none | `{ message }` |
+| GET | `/shops/{shopCode}/coupons` | Public | `product_id?` | `{ coupons }`; only available offers assigned to active products |
+| GET | `/private/shop/stocktakes` | Bearer shop owner | none | `{ data: StocktakeSummary[] }`, latest 30 owned sessions |
+| POST | `/private/shop/stocktakes` | Bearer shop owner | `name` (max 120) | `201 { data: Stocktake }`, stock and movement snapshot for each product / non-retired variant |
+| GET | `/private/shop/stocktakes/{id}` | Bearer shop owner | none | `{ data: Stocktake }` including items and expected/counted/shortage/surplus/unknown totals |
+| POST | `/private/shop/stocktakes/{id}/scan` | Bearer shop owner | `code` (QR `DH:P:{uuid}` / `DH:V:{uuid}`, or SKU), `quantity?` (default 1), `scan_id` (UUID) | `{ data: Stocktake }`; retries with same scan ID are deduplicated; unknown codes counted separately |
+| PATCH | `/private/shop/stocktakes/{id}/items/{itemId}` | Bearer shop owner | `counted_quantity` (0–999999) | `{ data: Stocktake }`; absolute count correction |
+| POST | `/private/shop/stocktakes/{id}/complete` | Bearer shop owner | `adjust_stock` (boolean) | `{ message, data: Stocktake }`; false saves report; true reconciles with auditable movements only if stock and movement history remain unchanged; finalized sessions are immutable |
 | POST | `/private/shop/orders` | Bearer shop owner | Order payload from source request including idempotency fields and items | `201/200 { message, replayed }` + `Idempotency-Replayed` |
 | PATCH | `/private/shop/orders/{orderId}/status` | Bearer shop owner | `status` | `{ message, data }` |
 | PATCH | `/private/shop/categories/reorder` | Bearer shop owner | `category_ids[]` | `{ message }` |
@@ -104,7 +112,9 @@ Successful responses also include fresh `request: { duration_ms, database_querie
 | POST | `/private/uploads/images/prepare` | Bearer | multipart `token`, `image` | `204` |
 | DELETE | `/private/uploads/images/staged` | Bearer | `tokens[]` | `204` |
 
-The frontend first obtains a transform grant using its authenticated Server Action, then sends the original image directly to `/media/browser/transform` with the short-lived grant as its bearer token. The existing transform returns WebP up to 20 KiB; only that result goes through the final Server Action. This keeps original images up to 30 MiB out of Vercel Function request bodies. `IMAGE_BROWSER_URL` (or its default, `APP_URL`) must be reachable from the browser, and backend CORS must allow the frontend origin and the `Authorization` header.
+For product creation, the browser prepares WebP images locally, declares one batch through `/private/uploads/images`, then uploads at most two images concurrently through the authenticated same-origin `/api/live/uploads/images/prepare` transport, which maps to Laravel `/private/uploads/images/prepare`. Each prepare request contains one token and one image; retries reuse the token. The final product create request contains `primary_image_upload` and `gallery_image_uploads[]`, with no image binaries. Up to 50 gallery images plus one primary image are supported. Staged tokens are scoped to their owner; lock contention returns retryable 503 rather than a generic server error.
+
+Other image flows can obtain a transform grant using an authenticated Server Action, then send the original image directly to `/media/browser/transform` with the short-lived grant as its bearer token. The existing transform returns WebP up to 20 KiB; only that result goes through the final Server Action. This keeps original images up to 30 MiB out of Vercel Function request bodies. `IMAGE_BROWSER_URL` (or its default, `APP_URL`) must be reachable from the browser, and backend CORS must allow the frontend origin and the `Authorization` header.
 
 ## Admin
 

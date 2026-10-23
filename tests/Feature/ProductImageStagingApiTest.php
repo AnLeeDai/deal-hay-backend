@@ -10,11 +10,27 @@ use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Mockery\MockInterface;
 
+it('stages a detailed final product WebP above 20 KiB without modifying its bytes', function (): void {
+    $disk = Storage::fake('r2');
+    $shop = User::factory()->shopOwner()->create();
+    Sanctum::actingAs($shop);
+    $source = file_get_contents(base_path('tests/Fixtures/detailed-product.webp'));
+    $file = UploadedFile::fake()->createWithContent('product.webp', $source);
+    $token = $this->postJson('/api/private/uploads/images', [
+        'uploads' => [['size' => strlen($source), 'content_type' => 'image/webp']],
+    ])->assertOk()->json('uploads.0.token');
+    $this->post('/api/private/uploads/images/prepare', ['token' => $token, 'image' => $file], ['Accept' => 'application/json'])
+        ->assertNoContent();
+    $upload = StagedImageUpload::query()->sole();
+    expect($disk->get($upload->destination_path))->toBe($source);
+    expect($upload->prepared_at)->not->toBeNull();
+});
+
 it('stages fifty one images for two shops independently and creates products without storage IO', function (): void {
     $disk = Storage::fake('r2');
     $category = ProductCategory::factory()->create();
     $shops = [User::factory()->shopOwner()->create(), User::factory()->shopOwner()->create()];
-    $file = UploadedFile::fake()->image('prepared.webp', 64, 64);
+    $file = preparedImage('prepared.webp');
     $tokens = [];
 
     foreach ($shops as $shop) {
@@ -39,7 +55,7 @@ it('stages fifty one images for two shops independently and creates products wit
 
     // The final request must never decode or contact R2 for prepared tokens.
     $this->mock(ImageService::class, function (MockInterface $mock): void {
-        $mock->shouldNotReceive('readStream', 'write', 'upload', 'convertToWebp', 'normalizeBinary');
+        $mock->shouldNotReceive('readStream', 'writeStream', 'upload');
     });
     foreach ($shops as $shopIndex => $shop) {
         Sanctum::actingAs($shop);
@@ -62,12 +78,12 @@ it('keeps image preparation idempotent and isolates busy claims from another sho
     $disk = Storage::fake('r2');
     $first = User::factory()->shopOwner()->create();
     $second = User::factory()->shopOwner()->create();
-    $file = UploadedFile::fake()->image('prepared.png', 64, 64);
+    $file = preparedImage('prepared.webp');
     $tokens = [];
     foreach ([$first, $second] as $shop) {
         Sanctum::actingAs($shop);
         $tokens[] = $this->postJson('/api/private/uploads/images', [
-            'uploads' => [['size' => $file->getSize(), 'content_type' => 'image/png']],
+            'uploads' => [['size' => $file->getSize(), 'content_type' => 'image/webp']],
         ])->assertOk()->json('uploads.0.token');
     }
     $busy = StagedImageUpload::where('user_id', $first->getKey())->sole();

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Actions\ReplaceUserImage;
+use App\Enums\ImagePurposeEnum;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
@@ -12,7 +13,6 @@ use Illuminate\Validation\ValidationException;
 class MediaClient
 {
     public function __construct(
-        private readonly BrowserUploadService $browserUploads,
         private readonly ChatAttachmentService $chatAttachments,
         private readonly ImageService $images,
         private readonly R2ImageCleanupService $cleanup,
@@ -25,17 +25,7 @@ class MediaClient
         return $this->images->defaultAvatar();
     }
 
-    public function browserGrant(string $userId, int $size, string $purpose): array
-    {
-        return $this->browserUploads->grant($userId, $size, $purpose);
-    }
-
-    public function browserTransform(UploadedFile $file): string
-    {
-        return $this->browserUploads->prepare((string) request()->bearerToken(), $file);
-    }
-
-    public function upload(?UploadedFile $file, string $folder, string $errorField = 'image', string $disk = 'r2'): string
+    public function upload(?UploadedFile $file, string $folder, string $errorField = 'image', string $disk = 'r2', ImagePurposeEnum $purpose = ImagePurposeEnum::Product): string
     {
         if (! $file instanceof UploadedFile) {
             throw ValidationException::withMessages([
@@ -44,7 +34,7 @@ class MediaClient
         }
 
         try {
-            return $this->images->upload($file, $folder, $errorField, $disk);
+            return $this->images->upload($file, $folder, $errorField, $disk, $purpose);
         } catch (ValidationException $exception) {
             throw ValidationException::withMessages([$errorField => Arr::flatten($exception->errors())]);
         }

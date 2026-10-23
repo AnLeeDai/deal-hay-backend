@@ -7,7 +7,6 @@ use App\Models\ShopProductImage;
 use App\Models\User;
 use App\Services\MediaClient;
 use Illuminate\Database\Events\QueryExecuted;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -16,7 +15,7 @@ it('persists fifty gallery images in one insert with ordered paths and unique mo
     $this->freezeSecond();
     $shop = User::factory()->shopOwner()->create();
     $category = ProductCategory::factory()->create();
-    $file = UploadedFile::fake()->image('gallery.jpg', 8, 8);
+    $file = preparedImage('gallery.webp');
     $paths = array_map(fn (int $position): string => 'products/gallery/'.$position.'.webp', range(1, 50));
     $media = $this->partialMock(MediaClient::class);
     $media->shouldReceive('upload')->once()->with($file, $shop->user_code.'/products')->andReturn('products/primary.webp');
@@ -52,7 +51,7 @@ it('replaces many gallery rows with one delete and one insert while appending af
     $removed = $existing->take(49);
     $retained = $existing->last();
     $foreign = ShopProductImage::factory()->create();
-    $file = UploadedFile::fake()->image('gallery.jpg', 8, 8);
+    $file = preparedImage('gallery.webp');
     $paths = array_map(fn (int $position): string => 'products/new/'.$position.'.webp', range(1, 49));
     $media = $this->partialMock(MediaClient::class);
     $media->shouldReceive('upload')->times(49)->with($file, $shop->user_code.'/products/gallery')->andReturn(...$paths);
@@ -86,7 +85,7 @@ it('rolls gallery replacement back and cleans only new uploads when the bulk ins
     $existing = ShopProductImage::factory()->for($product, 'product')->count(2)
         ->sequence(['image_url' => 'products/old/first.webp', 'display_order' => 1], ['image_url' => 'products/old/second.webp', 'display_order' => 2])
         ->create();
-    $file = UploadedFile::fake()->image('gallery.jpg', 8, 8);
+    $file = preparedImage('gallery.webp');
     $paths = ['products/new/first.webp', 'products/new/second.webp'];
     $media = $this->partialMock(MediaClient::class);
     $media->shouldReceive('upload')->twice()->with($file, $shop->user_code.'/products/gallery')->andReturn(...$paths);

@@ -6,7 +6,6 @@ use App\Enums\ImagePurposeEnum;
 use App\Enums\UserRoleEnum;
 use App\Services\ImageService;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class MediaRequest extends FormRequest
 {
@@ -23,8 +22,8 @@ class MediaRequest extends FormRequest
             'storeStaged', 'storeUploadSessions' => [
                 'uploads' => ['required', 'array', 'list', 'max:51'],
                 'uploads.*' => ['required', 'array:size,content_type'],
-                'uploads.*.size' => ['required', 'integer', 'min:1', 'max:'.ImageService::MAX_SOURCE_BYTES],
-                'uploads.*.content_type' => ['required', 'string', Rule::in(ImagePurposeEnum::Product->inputMimeTypes())],
+                'uploads.*.size' => ['required', 'integer', 'min:1', 'max:'.ImageService::MAX_IMAGE_BYTES],
+                'uploads.*.content_type' => ['required', 'string', 'in:image/webp'],
             ],
             'prepareStaged' => [
                 'token' => ['required', 'string', 'max:2048'],
@@ -33,10 +32,6 @@ class MediaRequest extends FormRequest
             'discardStaged' => [
                 'tokens' => ['required', 'array', 'list', 'max:51'],
                 'tokens.*' => ['required', 'string', 'max:2048', 'distinct'],
-            ],
-            'transform' => [
-                'size' => ['required', 'integer', 'min:1', 'max:'.ImageService::MAX_SOURCE_BYTES],
-                'purpose' => ['required', Rule::enum(ImagePurposeEnum::class)],
             ],
             default => ['avatar' => ['required', ...ImagePurposeEnum::Avatar->uploadedFileRules()]],
         };
@@ -48,15 +43,16 @@ class MediaRequest extends FormRequest
         return [
             'uploads.max' => 'Mỗi lần được tải tối đa 51 ảnh.',
             'uploads.*.size.min' => 'Ảnh tải lên phải có ít nhất 1 byte.',
-            'uploads.*.size.max' => 'Ảnh tải lên không được vượt quá 30 MB.',
-            'uploads.*.content_type.in' => 'Ảnh tải lên phải có định dạng JPG, PNG, GIF, WEBP, AVIF hoặc BMP.',
+            'uploads.*.size.max' => 'Ảnh đã xử lý không được vượt quá 512 KB.',
+            'uploads.*.content_type.in' => 'Ảnh tải lên phải là WebP tĩnh đã được xử lý trên thiết bị.',
             'size.min' => 'Ảnh tải lên phải có ít nhất 1 byte.',
-            'size.max' => 'Ảnh tải lên không được vượt quá 30 MB.',
-            'purpose.enum' => 'Mục đích tải ảnh không hợp lệ.',
+            'size.max' => 'Ảnh đã xử lý không được vượt quá 20 KB.',
             'image.image' => 'Tệp tải lên phải là hình ảnh hợp lệ.',
-            'image.max' => 'Ảnh tải lên không được vượt quá 30 MB.',
+            'image.max' => 'Ảnh đã xử lý không được vượt quá 512 KB.',
+            'image.mimetypes' => 'Vui lòng gửi ảnh WebP tĩnh đã được xử lý trên thiết bị.',
             'avatar.image' => 'Ảnh đại diện phải là hình ảnh hợp lệ.',
-            'avatar.max' => 'Ảnh đại diện không được vượt quá 30 MB.',
+            'avatar.max' => 'Ảnh đại diện đã xử lý không được vượt quá 20 KB.',
+            'avatar.mimetypes' => 'Vui lòng gửi ảnh WebP tĩnh đã được xử lý trên thiết bị.',
         ];
     }
 }

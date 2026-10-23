@@ -14,7 +14,6 @@ All successful JSON responses use UTF-8 JSON. Validation failures return `422 { 
 | GET | `/addresses/provinces` | Public | none | `[{ code, name }]` |
 | GET | `/addresses/provinces/{provinceCode}/wards` | Public | none | `[{ code, name, division_type }]` |
 | GET | `/media/assets/{path}` | Public | none | `302` redirect to resolved asset URL |
-| POST | `/media/browser/transform` | Public bearer upload token | multipart `image` | Binary WebP response for browser-compressed uploads |
 
 ## Authentication
 
@@ -125,15 +124,28 @@ Serialized money fields are `expected_value`, `counted_value`, `shortage_value`,
 
 | Method | Path | Auth | Request body | Response shape |
 |---|---|---|---|---|
-| POST | `/private/media/transform` | Bearer | `size` (1 byte to 30 MiB, in bytes), `purpose` (`avatar`, `product`, `review`, `chat`) | `{ url, token }` for direct browser transform upload |
-| POST | `/private/uploads/images/presign` | Bearer | Up to 51 `uploads: [{ size, content_type }]`; each image is 1 byte to 30 MiB | `{ uploads: [{ token, url?, headers? }] }` |
-| POST | `/private/uploads/images` | Bearer | Up to 51 `uploads: [{ size, content_type }]`; each image is 1 byte to 30 MiB | `{ uploads: [{ token }] }` |
-| POST | `/private/uploads/images/prepare` | Bearer | multipart `token`, `image` | `204` |
+| POST | `/private/uploads/images/presign` | Bearer | Up to 51 `uploads: [{ size, content_type: "image/webp" }]`; each prepared product image is 1 byte to 512 KiB (524288 bytes) | `{ uploads: [{ token, url?, headers? }] }` |
+| POST | `/private/uploads/images` | Bearer | Up to 51 `uploads: [{ size, content_type: "image/webp" }]`; each prepared product image is 1 byte to 512 KiB (524288 bytes) | `{ uploads: [{ token }] }` |
+| POST | `/private/uploads/images/prepare` | Bearer | multipart `token`, `image` containing the final static product WebP, maximum 512 KiB | `204` after storage succeeds |
 | DELETE | `/private/uploads/images/staged` | Bearer | `tokens[]` | `204` |
 
-For product creation, the browser prepares WebP images locally, declares one batch through `/private/uploads/images`, then uploads at most two images concurrently through the authenticated same-origin `/api/live/uploads/images/prepare` transport, which maps to Laravel `/private/uploads/images/prepare`. Each prepare request contains one token and one image; retries reuse the token. The final product create request contains `primary_image_upload` and `gallery_image_uploads[]`, with no image binaries. Up to 50 gallery images plus one primary image are supported. Staged tokens are scoped to their owner; lock contention returns retryable 503 rather than a generic server error.
+Every image ingress accepts only the final static WebP with limits specific to its purpose:
 
-Other image flows can obtain a transform grant using an authenticated Server Action, then send the original image directly to `/media/browser/transform` with the short-lived grant as its bearer token. The existing transform returns WebP up to 20 KiB; only that result goes through the final Server Action. This keeps original images up to 30 MiB out of Vercel Function request bodies. `IMAGE_BROWSER_URL` (or its default, `APP_URL`) must be reachable from the browser, and backend CORS must allow the frontend origin and the `Authorization` header.
+| Purpose | Maximum file size | Maximum long edge |
+|---|---|---|
+| Product primary/gallery, direct or staged | 512 KiB (524288 bytes) | 1280 px |
+| Profile/shop avatar | 20 KiB (20480 bytes) | 640 px |
+| Review/chat image | 20 KiB (20480 bytes) | 1280 px |
+
+The browser accepts source images up to 30 MiB and performs decoding, orientation, flattening to one static frame, resizing and WebP compression locally. It may shrink further to fit the corresponding byte budget. Product images retain a larger byte budget to preserve product detail. Browser decoding is serialized and at most two prepared images upload concurrently. An unsupported browser format or encoder fails locally rather than sending the original image to the backend.
+
+For product creation, the browser prepares the final WebP images before declaring a batch through `/private/uploads/images`, then sends one token and one image per request through the authenticated same-origin `/api/live/uploads/images/prepare` transport, which maps to Laravel `/private/uploads/images/prepare`. Retries reuse the token. The final product create request contains `primary_image_upload` and `gallery_image_uploads[]`, with no image binaries. Up to 50 gallery images plus one primary image are supported. The presigned R2 channel remains available and applies the same final-image contract. Staged tokens remain owner scoped, size bound and single use; quotas, concurrency guards and cleanup remain in effect.
+
+The backend performs lightweight WebP header and byte-size validation, streams the exact prepared bytes into R2 and saves the media reference in the database. It does not decode, resize, rotate or re-encode images. Transform grants and server image-transform endpoints have been removed, along with ImageManager/Intervention and the Docker GD/EXIF extensions. The `images` queue retains its name for storage cleanup, with no image transformations. Existing relative R2 references and resolved asset URLs remain compatible; `/media/assets/{path}` continues to redirect without processing image bytes. Chat attachment access still checks conversation membership.
+
+PHP development/production limits are `upload_max_filesize=3M`, `post_max_size=32M` and `max_file_uploads=51`, allowing a complete multipart product batch or a non-image chat attachment of up to 3 MiB. The normal frontend product flow still sends one prepared image per staging request.
+
+Deploy frontend and backend together and rebuild the backend container. This change requires no database migration. Old clients submitting original or otherwise unprepared images receive `422 { message, errors }`.
 
 ## Admin
 

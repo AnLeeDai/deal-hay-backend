@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Enums\ImagePurposeEnum;
 use App\Models\ShopProduct;
 use App\Models\ShopProductReview;
 use App\Models\User;
@@ -37,7 +38,7 @@ class SaveShopProductReview
         $data = Arr::only($validated, ['reaction', 'content']);
 
         if ($image instanceof UploadedFile) {
-            $data['image_url'] = $this->images->upload($image, $customer->user_code.'/product-reviews');
+            $data['image_url'] = $this->images->upload($image, $customer->user_code.'/product-reviews', purpose: ImagePurposeEnum::Review);
         } elseif ((bool) ($validated['remove_image'] ?? false)) {
             $data['image_url'] = null;
         }

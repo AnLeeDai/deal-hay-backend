@@ -42,17 +42,19 @@ it('stores file attachments under the conversation UUID on the private disk', fu
     Event::assertDispatched(ChatMessageSentEvent::class, fn (ChatMessageSentEvent $event): bool => $event->message->is($message));
 });
 
-it('normalizes image attachments to private WebP objects under the conversation UUID', function (): void {
+it('stores processed image attachments unchanged as private WebP objects under the conversation UUID', function (): void {
     $privateDisk = Storage::fake('r2_private');
     $conversation = ChatConversation::factory()->create();
     Sanctum::actingAs($conversation->buyer);
     Event::fake([ChatMessageSentEvent::class]);
     $clientMessageId = (string) Str::uuid();
+    $image = preparedImage('photo.webp');
+    $original = file_get_contents($image->getRealPath());
 
     $response = $this->withHeader('Idempotency-Key', $clientMessageId)
         ->post('/api/messages/'.$conversation->slug, [
             'client_message_id' => $clientMessageId,
-            'attachment' => UploadedFile::fake()->image('photo.jpg', 64, 64),
+            'attachment' => $image,
         ], ['Accept' => 'application/json']);
 
     $response->assertCreated()
@@ -63,6 +65,7 @@ it('normalizes image attachments to private WebP objects under the conversation 
     expect($message->attachment_path)->toStartWith('chat-media/'.$conversation->getKey().'/')->toEndWith('.webp');
     expect($message->attachment_disk)->toBe('r2_private');
     $privateDisk->assertExists($message->attachment_path);
+    expect($privateDisk->get($message->attachment_path))->toBe($original);
     expect(getimagesizefromstring($privateDisk->get($message->attachment_path))['mime'])->toBe('image/webp');
     expect($message->attachment_size)->toBe($privateDisk->size($message->attachment_path));
     Event::assertDispatched(ChatMessageSentEvent::class, fn (ChatMessageSentEvent $event): bool => $event->message->is($message));
@@ -77,7 +80,15 @@ it('returns 422 without saving or broadcasting a message when private image stor
     $privateDisk = Mockery::mock(FilesystemAdapter::class);
     $privateDisk->shouldReceive('put')->once()->with(
         Mockery::on(fn (string $path): bool => str_starts_with($path, 'chat-media/'.$conversation->getKey().'/') && str_ends_with($path, '.webp')),
-        Mockery::on(fn (string $content): bool => (getimagesizefromstring($content)['mime'] ?? null) === 'image/webp'),
+        Mockery::on(function (mixed $stream): bool {
+            if (! is_resource($stream)) {
+                return false;
+            }
+            $content = stream_get_contents($stream);
+            rewind($stream);
+
+            return (getimagesizefromstring($content)['mime'] ?? null) === 'image/webp';
+        }),
         ['ContentType' => 'image/webp'],
     )->andThrow($failure);
     Storage::shouldReceive('disk')->once()->with('r2_private')->andReturn($privateDisk);
@@ -87,7 +98,7 @@ it('returns 422 without saving or broadcasting a message when private image stor
         ->post('/api/messages/'.$conversation->slug, [
             ...$messageFields,
             'client_message_id' => $clientMessageId,
-            'attachment' => UploadedFile::fake()->image('photo.jpg', 64, 64),
+            'attachment' => preparedImage('photo.webp'),
         ], ['Accept' => 'application/json']);
 
     $response->assertUnprocessable()

@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Enums\ImagePurposeEnum;
 use App\Models\User;
 use App\Services\ImageService;
 use App\Services\R2ImageCleanupService;
@@ -25,7 +26,7 @@ class ReplaceUserImage
     public function handle(User $user, string $attribute, string $folder, UploadedFile $file): void
     {
         $previousPath = $user->getRawOriginal($attribute);
-        $path = $this->images->upload($file, $folder, 'avatar');
+        $path = $this->images->upload($file, $folder, 'avatar', purpose: ImagePurposeEnum::Avatar);
 
         try {
             $user->setAttribute($attribute, $path)->save();

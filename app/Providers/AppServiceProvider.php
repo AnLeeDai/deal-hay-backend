@@ -19,15 +19,12 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
-use Intervention\Image\Drivers\Gd\Driver;
-use Intervention\Image\ImageManager;
 use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->singleton(ImageManager::class, fn () => new ImageManager(new Driver, decodeAnimation: false));
         $this->app->singleton(OutboxWorkerHealth::class);
     }
 

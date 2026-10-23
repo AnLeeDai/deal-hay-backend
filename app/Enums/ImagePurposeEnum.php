@@ -2,10 +2,11 @@
 
 namespace App\Enums;
 
+use App\Rules\PreparedWebp;
+
 /**
- * One source of truth for image input policies. Every image still passes
- * through ImageService before storage; these profiles only express the
- * purpose-specific browser/request limits around that shared normalizer.
+ * Policies for final browser-processed images. The server validates metadata
+ * and stores the original bytes without decoding or transforming pixels.
  */
 enum ImagePurposeEnum: string
 {
@@ -18,28 +19,23 @@ enum ImagePurposeEnum: string
     public function inputMimeTypes(): array
     {
         return [
-            ImageUploadTypeEnum::JPEG,
-            ImageUploadTypeEnum::PNG,
-            ImageUploadTypeEnum::GIF,
             ImageUploadTypeEnum::WEBP,
-            ImageUploadTypeEnum::AVIF,
-            ImageUploadTypeEnum::BMP,
         ];
     }
 
     public function maxKilobytes(): int
     {
-        return 30_720;
+        return $this === self::Product ? 512 : 20;
     }
 
-    /** @return list<string> */
+    /** @return list<mixed> */
     public function uploadedFileRules(): array
     {
         return [
             'file',
-            'image',
             'mimetypes:'.implode(',', $this->inputMimeTypes()),
             'max:'.$this->maxKilobytes(),
+            new PreparedWebp($this),
         ];
     }
 }

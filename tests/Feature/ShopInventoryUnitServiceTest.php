@@ -12,7 +12,6 @@ use App\Models\ShopProductVariant;
 use App\Models\User;
 use App\Services\MediaClient;
 use App\Services\ShopInventoryUnitService;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -109,7 +108,7 @@ it('keeps inactive physical stock available and removes retired variant labels w
 it('initializes unit labels through product creation and preserves them through inventory updates', function (): void {
     $owner = User::factory()->shopOwner()->create();
     $category = ProductCategory::factory()->create();
-    $image = UploadedFile::fake()->image('primary.png', 8, 8);
+    $image = preparedImage('primary.webp');
     $media = $this->partialMock(MediaClient::class);
     $media->shouldReceive('upload')->once()->andReturn('products/primary.webp');
     $media->shouldReceive('deleteLater')->andReturnNull();

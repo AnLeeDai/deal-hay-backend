@@ -54,6 +54,7 @@ class ChatAttachmentService
                 'chat-media/'.$conversationId,
                 'attachment',
                 $disk,
+                ImagePurposeEnum::Chat,
             ),
             default => $attachment->store('chat-media/'.$conversationId, $disk),
         };

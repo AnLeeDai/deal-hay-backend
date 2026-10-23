@@ -1,51 +1,85 @@
 <?php
 
+use App\Enums\ImagePurposeEnum;
 use App\Services\ImageService;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Intervention\Image\Exceptions\ImageDecoderException;
+use Illuminate\Validation\ValidationException;
 
-it('rejects binary sources outside the safe range before decoding', function (string $content): void {
-    expect(fn () => app(ImageService::class)->normalizeBinary($content))
-        ->toThrow(ImageDecoderException::class, 'Ảnh tải lên phải có kích thước từ 1 byte đến 30 MB.');
-})->with([
-    'empty source' => '',
-    'over 30 MB' => fn (): string => str_repeat('x', ImageService::MAX_SOURCE_BYTES + 1),
-]);
+it('streams browser processed WebP bytes to storage unchanged', function (): void {
+    $file = preparedImage();
+    $source = file_get_contents($file->getRealPath());
+    $disk = Mockery::mock(FilesystemAdapter::class);
+    $disk->shouldReceive('put')->once()->withArgs(function (string $path, mixed $stream, array $options) use ($source): bool {
+        expect(is_resource($stream))->toBeTrue();
+        expect(stream_get_contents($stream))->toBe($source);
 
-it('rejects oversized uploaded files before decoding', function (): void {
-    $file = UploadedFile::fake()->image('photo.jpg', 64, 64)->size(30_721);
+        return str_starts_with($path, 'owner/products/') && str_ends_with($path, '.webp') && $options['ContentType'] === 'image/webp';
+    })->andReturn(true);
+    Storage::shouldReceive('disk')->once()->with('r2')->andReturn($disk);
 
-    expect(fn () => app(ImageService::class)->convertToWebp($file))
-        ->toThrow(ImageDecoderException::class, 'Ảnh tải lên phải có kích thước từ 1 byte đến 30 MB.');
+    expect(app(ImageService::class)->upload($file, 'owner/products'))->toStartWith('owner/products/')->toEndWith('.webp');
 });
 
-it('rejects images exceeding the available memory before decoding pixel data', function (bool $binary): void {
-    $header = substr(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='), 0, 33);
-    $header = substr_replace($header, pack('NN', 4000, 3000), 16, 8);
-    $file = UploadedFile::fake()->createWithContent('large.png', $header);
-    $previousLimit = ini_set('memory_limit', (string) (memory_get_usage(true) + 16 * 1024 * 1024));
+it('rejects raw formats and MIME spoofing without storing or transforming', function (string $content, string $name): void {
+    $disk = Storage::fake('r2');
+    $file = UploadedFile::fake()->createWithContent($name, $content);
+    expect(fn () => app(ImageService::class)->upload($file, 'owner/products'))
+        ->toThrow(ValidationException::class, 'Vui lòng gửi ảnh WebP tĩnh đã được xử lý trên thiết bị.');
+    expect($disk->allFiles())->toBeEmpty();
+})->with([
+    'raw PNG' => [base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='), 'photo.png'],
+    'raw GIF' => [base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), 'photo.gif'],
+    'spoofed WebP' => ['<svg xmlns="http://www.w3.org/2000/svg"/>', 'photo.webp'],
+]);
 
-    try {
-        expect(fn () => $binary
-            ? app(ImageService::class)->normalizeBinary($header)
-            : app(ImageService::class)->convertToWebp($file))
-            ->toThrow(ImageDecoderException::class, 'Ảnh cần quá nhiều bộ nhớ để xử lý. Vui lòng giảm kích thước hoặc độ phân giải ảnh rồi thử lại.');
-    } finally {
-        ini_set('memory_limit', $previousLimit);
+it('rejects final images outside the product 512 KiB bound', function (string $content): void {
+    $file = UploadedFile::fake()->createWithContent('photo.webp', $content);
+    expect(fn () => app(ImageService::class)->validateFile($file))
+        ->toThrow(ValidationException::class, 'Ảnh đã xử lý phải có kích thước từ 1 byte đến 512 KB.');
+})->with(['empty' => '', 'over limit' => fn (): string => str_repeat('x', ImageService::MAX_IMAGE_BYTES + 1)]);
+
+it('preserves detailed product images above 20 KiB while retaining smaller limits for other purposes', function (): void {
+    $source = file_get_contents(base_path('tests/Fixtures/detailed-product.webp'));
+    expect(strlen($source))->toBeGreaterThan(20 * 1024)->toBeLessThanOrEqual(512 * 1024);
+    $file = UploadedFile::fake()->createWithContent('detailed.webp', $source);
+    $disk = Storage::fake('r2');
+    $path = app(ImageService::class)->upload($file, 'owner/products', purpose: ImagePurposeEnum::Product);
+    expect($disk->get($path))->toBe($source);
+    foreach ([ImagePurposeEnum::Avatar, ImagePurposeEnum::Review, ImagePurposeEnum::Chat] as $purpose) {
+        expect(fn () => app(ImageService::class)->validateFile($file, $purpose))
+            ->toThrow(ValidationException::class, 'Ảnh đã xử lý phải có kích thước từ 1 byte đến 20 KB.');
     }
-})->with(['binary source' => [true], 'uploaded file' => [false]]);
+});
 
-it('allows image memory budgeting when PHP has no memory limit', function (): void {
-    $previousLimit = ini_set('memory_limit', '-1');
+it('checks container boundaries static frames and purpose dimensions without raster decoding', function (string $case): void {
+    $source = file_get_contents(base_path('tests/Fixtures/prepared.webp'));
+    $chunk = substr($source, 12);
+    $make = static fn (string $chunks): string => 'RIFF'.pack('V', strlen($chunks) + 4).'WEBP'.$chunks;
+    $content = match ($case) {
+        'truncated RIFF' => substr($source, 0, -1),
+        'extra trailing data' => $source.'x',
+        'oversized chunk' => substr_replace($source, pack('V', 0xFFFFFFFF), 16, 4),
+        'animation flag' => $make('VP8X'.pack('V', 10)."\x02\0\0\0\x3f\0\0\x3f\0\0".$chunk),
+        'animation chunk' => $make('ANIM'.pack('V', 6).str_repeat("\0", 6).$chunk),
+        'duplicate frame' => $make($chunk.$chunk),
+        'missing frame' => $make('EXIF'.pack('V', 4).'meta'),
+        'oversized dimensions' => substr_replace($source, pack('v', 1281), 26, 2),
+    };
+    expect(fn () => app(ImageService::class)->validateFile(UploadedFile::fake()->createWithContent('invalid.webp', $content)))
+        ->toThrow(ValidationException::class);
+})->with(['truncated RIFF', 'extra trailing data', 'oversized chunk', 'animation flag', 'animation chunk', 'duplicate frame', 'missing frame', 'oversized dimensions']);
 
-    try {
-        ImageService::assertMemoryBudget(8192, 8192, ImageService::MAX_SOURCE_BYTES);
-    } finally {
-        ini_set('memory_limit', $previousLimit);
-    }
-})->throwsNoExceptions();
+it('applies the smaller avatar limit without resizing or modifying a product image', function (): void {
+    $source = file_get_contents(base_path('tests/Fixtures/prepared.webp'));
+    $source = substr_replace($source, pack('v', 641), 26, 2);
+    $file = UploadedFile::fake()->createWithContent('wide.webp', $source);
+    app(ImageService::class)->validateFile($file, ImagePurposeEnum::Product);
+    expect(fn () => app(ImageService::class)->validateFile($file, ImagePurposeEnum::Avatar))
+        ->toThrow(ValidationException::class, 'Ảnh đã xử lý không được vượt quá 640 pixel mỗi chiều.');
+    expect(file_get_contents($file->getRealPath()))->toBe($source);
+});
 
 it('keeps shared system avatars when bulk image cleanup runs', function (): void {
     $disk = Storage::fake('r2');

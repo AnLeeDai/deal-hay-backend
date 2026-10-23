@@ -7,8 +7,6 @@ FROM dunglas/frankenphp:1-php8.4-bookworm
 RUN apt-get update \
     && apt-get install -y --no-install-recommends supervisor unzip \
     && install-php-extensions \
-        exif \
-        gd \
         pcntl \
         pdo_mysql \
     && rm -rf /var/lib/apt/lists/*

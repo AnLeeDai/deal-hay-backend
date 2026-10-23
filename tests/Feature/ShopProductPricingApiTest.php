@@ -4,7 +4,6 @@ use App\Models\ProductCategory;
 use App\Models\ShopProduct;
 use App\Models\User;
 use App\Services\MediaClient;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 
@@ -48,7 +47,7 @@ it('creates a discounted product with its own video and no seller advertisement'
         'name' => 'Sản phẩm có ưu đãi', 'category' => $category->name,
         'price' => 80000, 'old_price' => 100000, 'stock' => 9,
         'video_url' => 'https://example.com/product.mp4',
-        'image' => UploadedFile::fake()->image('product.jpg'),
+        'image' => preparedImage('product.webp'),
     ])->assertCreated();
 
     $this->assertDatabaseHas('shop_products', [
@@ -106,7 +105,7 @@ it('returns 422 for seller advertisement settings on every product write endpoin
         'name' => $product->name, 'category' => $product->productCategory->name,
         'price' => 70000, 'old_price' => 100000, 'stock' => 12,
         'video_url' => 'https://example.com/product.mp4',
-        'image' => UploadedFile::fake()->image('product.jpg'),
+        'image' => preparedImage('product.webp'),
         $field => $value,
     ];
     [$method, $url] = match ($operation) {

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\BrowserUploadRequest;
 use App\Http\Requests\MediaAssetRequest;
 use App\Http\Requests\MediaRequest;
 use App\Models\User;
@@ -78,28 +77,6 @@ class MediaGatewayController extends Controller
         return response()->json([
             'message' => 'Cập nhật ảnh cửa hàng thành công.',
             'data' => $user->refresh(),
-        ]);
-    }
-
-    public function transform(MediaRequest $request): JsonResponse
-    {
-        /** @var User $user */
-        $user = $request->user();
-
-        return response()->json(
-            $this->stagedUploads->browserGrant(
-                (string) $user->getKey(),
-                (int) $request->validated('size'),
-                (string) $request->validated('purpose'),
-            ),
-        );
-    }
-
-    public function browserTransform(BrowserUploadRequest $request): Response
-    {
-        return response($this->stagedUploads->browserTransform($request->file('image')), headers: [
-            'Content-Type' => 'image/webp',
-            'Cache-Control' => 'no-store',
         ]);
     }
 

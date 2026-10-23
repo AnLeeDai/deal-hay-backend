@@ -8,7 +8,6 @@ use App\Models\ShopProduct;
 use App\Models\User;
 use Illuminate\Broadcasting\BroadcastEvent;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -68,7 +67,7 @@ it('sends an image-only reply retaining the original attachment summary', functi
         ->post('/api/messages/'.$conversation->slug, [
             'client_message_id' => $clientMessageId,
             'reply_to_id' => $original->getKey(),
-            'attachment' => UploadedFile::fake()->image('reply.jpg', 32, 32),
+            'attachment' => preparedImage('reply.webp'),
         ], ['Accept' => 'application/json']);
 
     $response->assertCreated()->assertJsonPath('attachment.type', 'image')

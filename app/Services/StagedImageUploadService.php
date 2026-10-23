@@ -16,9 +16,9 @@ use Throwable;
 
 class StagedImageUploadService
 {
-    public const int MAX_IMAGE_BYTES = ImageService::MAX_SOURCE_BYTES;
+    public const int MAX_IMAGE_BYTES = ImageService::MAX_IMAGE_BYTES;
 
-    private const int MAX_NORMALIZED_IMAGE_BYTES = ImageService::MAX_OUTPUT_BYTES;
+    private const string TOKEN_FORMAT = 'static-webp-v1';
 
     public const int TOKEN_TTL_MINUTES = 45;
 
@@ -35,6 +35,11 @@ class StagedImageUploadService
      */
     public function issueBatch(UploadOwner $user, array $uploads, bool $presign = true): array
     {
+        foreach ($uploads as $upload) {
+            if (($upload['content_type'] ?? null) !== 'image/webp' || (int) ($upload['size'] ?? 0) < 1 || (int) $upload['size'] > self::MAX_IMAGE_BYTES) {
+                $this->invalidUpload('Vui lòng gửi ảnh WebP tĩnh đã xử lý, tối đa 512 KB.');
+            }
+        }
         $sizes = array_map(
             static fn (array $upload): int => (int) $upload['size'],
             $uploads,
@@ -112,6 +117,7 @@ class StagedImageUploadService
                     'path' => $path,
                     'expires_at' => $expiresAt->getTimestamp(),
                     'expected_size' => $expectedSize,
+                    'format' => self::TOKEN_FORMAT,
                 ], JSON_THROW_ON_ERROR)),
                 ...$signed,
             ];
@@ -126,10 +132,10 @@ class StagedImageUploadService
 
     public function prepareImage(UploadOwner $user, string $token, UploadedFile $file): void
     {
-        $upload = $this->claimToken($user, $token, $user->user_code.'/products', retryIfBusy: true);
+        [$upload, $validatePrepared] = $this->claimToken($user, $token, $user->user_code.'/products', retryIfBusy: true);
 
         try {
-            $this->prepareClaimedUpload($upload, $file);
+            $this->prepareClaimedUpload($upload, $file, $validatePrepared);
             $this->releaseClaim($upload);
         } catch (ValidationException $exception) {
             $this->finishClaim($upload);
@@ -144,10 +150,10 @@ class StagedImageUploadService
 
     public function consume(UploadOwner $user, string $token, string $folder): string
     {
-        $upload = $this->claimToken($user, $token, $folder);
+        [$upload, $validatePrepared] = $this->claimToken($user, $token, $folder);
 
         try {
-            $destination = $this->prepareClaimedUpload($upload);
+            $destination = $this->prepareClaimedUpload($upload, validatePrepared: $validatePrepared);
             $this->finishClaim($upload);
 
             return $destination;
@@ -162,7 +168,8 @@ class StagedImageUploadService
         }
     }
 
-    private function claimToken(UploadOwner $user, string $token, string $folder, bool $retryIfBusy = false): StagedImageUpload
+    /** @return array{StagedImageUpload, bool} */
+    private function claimToken(UploadOwner $user, string $token, string $folder, bool $retryIfBusy = false): array
     {
         try {
             /** @var array{upload_id?: mixed, user_id?: mixed, path?: mixed, expires_at?: mixed, expected_size?: mixed} $payload */
@@ -183,119 +190,113 @@ class StagedImageUploadService
 
         $expectedSize = (int) ($payload['expected_size'] ?? 0);
 
-        return $this->claimUpload(
+        return [$this->claimUpload(
             $user,
             $uploadId,
             $path,
             $expectedSize,
             $folder,
             $retryIfBusy,
-        );
+        ), ($payload['format'] ?? null) !== self::TOKEN_FORMAT];
     }
 
-    private function prepareClaimedUpload(StagedImageUpload $upload, ?UploadedFile $file = null): string
+    private function prepareClaimedUpload(StagedImageUpload $upload, ?UploadedFile $file = null, bool $validatePrepared = false): string
     {
+        $destination = (string) $upload->destination_path;
         if ($upload->prepared_at !== null) {
-            return (string) $upload->destination_path;
+            // Earlier grants could point at server-normalized images up to 3 MiB.
+            // New signed grants already passed this policy during preparation.
+            if ($validatePrepared) {
+                $stream = $this->readSource($destination);
+                try {
+                    $this->images->validateStream($stream, fstat($stream)['size']);
+                } catch (ValidationException $exception) {
+                    $this->discardSource($destination);
+                    throw $exception;
+                } finally {
+                    fclose($stream);
+                }
+            }
+
+            return $destination;
         }
 
         $path = (string) $upload->path;
         $expectedSize = (int) $upload->expected_size;
-
         if ($expectedSize < 1 || $expectedSize > self::MAX_IMAGE_BYTES) {
             if ($file === null) {
                 $this->discardSource($path);
             }
-            $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 30 MB.');
+            $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 512 KB.');
         }
-
-        $destination = (string) $upload->destination_path;
-        $content = $file === null ? $this->readSource($path, $expectedSize) : null;
-
+        $stream = null;
         try {
             if ($file !== null) {
                 if ($file->getSize() !== $expectedSize) {
-                    $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 30 MB.');
+                    $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 512 KB.');
                 }
-
-                $normalizedContent = $this->images->convertToWebp($file);
+                $this->images->validateFile($file);
+                $stream = fopen($file->getRealPath(), 'rb');
+                if ($stream === false) {
+                    throw new RuntimeException('Không thể đọc tệp ảnh tải lên.');
+                }
             } else {
-                if (strlen($content) !== $expectedSize) {
-                    $this->discardSource($path);
-                    $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 30 MB.');
+                $stream = $this->readSource($path);
+                if (fstat($stream)['size'] !== $expectedSize) {
+                    $this->invalidUpload('Kích thước ảnh tải lên không khớp hoặc vượt quá 512 KB.');
                 }
-
-                $normalizedContent = $this->images->normalizeBinary($content);
-                unset($content);
+                $this->images->validateStream($stream, $expectedSize);
+            }
+            try {
+                if (! $this->images->writeStream($destination, $stream)) {
+                    throw new RuntimeException('R2 từ chối ghi tệp.');
+                }
+            } catch (Throwable $exception) {
+                report($exception);
+                throw new ServiceUnavailableHttpException(2, 'Kho lưu trữ ảnh đang bận. Vui lòng thử lại sau ít giây.', $exception);
             }
         } catch (ValidationException $exception) {
+            if ($file === null) {
+                $this->discardSource($path);
+            }
             throw $exception;
-        } catch (Throwable $exception) {
-            report($exception);
-            if ($file === null) {
-                $this->discardSource($path);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
             }
-            $this->invalidUpload('Nội dung ảnh tải lên không hợp lệ hoặc vượt quá giới hạn an toàn.');
         }
-
-        if (strlen($normalizedContent) > self::MAX_NORMALIZED_IMAGE_BYTES) {
-            if ($file === null) {
-                $this->discardSource($path);
-            }
-            $this->invalidUpload('Ảnh sau khi chuẩn hóa vượt quá giới hạn 3 MB.');
-        }
-
-        try {
-            if (! $this->images->write($destination, $normalizedContent)) {
-                throw new RuntimeException('R2 từ chối ghi tệp.');
-            }
-        } catch (Throwable $exception) {
-            report($exception);
-
-            throw new ServiceUnavailableHttpException(
-                2,
-                'Kho lưu trữ ảnh đang bận. Vui lòng thử lại sau ít giây.',
-                $exception,
-            );
-        }
-
         $upload->forceFill(['prepared_at' => now()])->save();
-
-        try {
-            if ($file === null) {
-                $this->images->delete($path);
-            }
-        } catch (Throwable $exception) {
-            report($exception);
+        if ($file === null) {
+            $this->discardSource($path);
         }
 
         return $destination;
     }
 
-    private function readSource(string $path, int $expectedSize): string
+    /** @return resource A bounded, seekable stream containing the unchanged source. */
+    private function readSource(string $path)
     {
+        $source = null;
+        $temporary = null;
         try {
-            $stream = $this->images->readStream($path);
-
-            try {
-                $content = stream_get_contents($stream, $expectedSize + 1);
-            } finally {
-                fclose($stream);
-            }
-
-            if (! is_string($content)) {
+            $source = $this->images->readStream($path);
+            $temporary = tmpfile();
+            if ($temporary === false || stream_copy_to_stream($source, $temporary, self::MAX_IMAGE_BYTES + 1) === false) {
                 throw new RuntimeException('Không thể đọc đầy đủ nội dung ảnh tải lên.');
             }
+            rewind($temporary);
 
-            return $content;
+            return $temporary;
         } catch (Throwable $exception) {
+            if (is_resource($temporary)) {
+                fclose($temporary);
+            }
             report($exception);
-
-            throw new ServiceUnavailableHttpException(
-                2,
-                'Kho lưu trữ ảnh đang bận. Vui lòng thử lại sau ít giây.',
-                $exception,
-            );
+            throw new ServiceUnavailableHttpException(2, 'Kho lưu trữ ảnh đang bận. Vui lòng thử lại sau ít giây.', $exception);
+        } finally {
+            if (is_resource($source)) {
+                fclose($source);
+            }
         }
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\ImagePurposeEnum;
 use App\Enums\ShopReactionTypeEnum;
 use App\Services\ShopProductReviewEligibility;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -25,7 +26,7 @@ class UpdateShopProductReviewRequest extends InteractWithShopProductReviewReques
         return [
             'reaction' => ['required', Rule::enum(ShopReactionTypeEnum::class)],
             'content' => ['required', 'string', 'min:5', 'max:2000'],
-            'image' => ['sometimes', 'nullable', 'file'],
+            'image' => ['sometimes', 'nullable', ...ImagePurposeEnum::Review->uploadedFileRules()],
             'remove_image' => ['sometimes', 'boolean'],
         ];
     }

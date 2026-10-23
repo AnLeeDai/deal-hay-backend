@@ -39,7 +39,6 @@ use Illuminate\Support\Facades\Route;
 Route::get('/media/assets/{path}', [MediaGatewayController::class, 'asset'])
     ->where('path', '.*')
     ->name('media.asset');
-Route::post('/media/browser/transform', [MediaGatewayController::class, 'browserTransform'])->name('media.browser.transform');
 Route::prefix('diagnostics/speedtest')->middleware('throttle:speedtest-probe')->group(function (): void {
     Route::get('/ping', [SpeedtestController::class, 'ping'])->name('speedtest.ping');
     Route::get('/download', [SpeedtestController::class, 'download'])->name('speedtest.download');
@@ -192,7 +191,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
         Route::patch('/shop/orders/{shopOrder}/status', [ShopOrderController::class, 'updateStatus'])->name('shop.orders.status.update');
         Route::patch('/shop/categories/reorder', [ShopController::class, 'reorderCategories'])->name('shop.categories.reorder');
 
-        Route::post('/media/transform', [MediaGatewayController::class, 'transform'])->name('media.transform');
         Route::post('/uploads/images/presign', [MediaGatewayController::class, 'storeStaged'])
             ->middleware('throttle:image-upload-presign')
             ->name('uploads.images.presign');

@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Enums\ImageUploadTypeEnum;
+use App\Enums\ImagePurposeEnum;
 use App\Support\StrictUploadSignatureV4;
 use Aws\S3\S3Client;
 use DateTimeInterface;
@@ -13,9 +13,6 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Intervention\Image\Encoders\WebpEncoder;
-use Intervention\Image\Exceptions\ImageDecoderException;
-use Intervention\Image\ImageManager;
 use RuntimeException;
 use Throwable;
 
@@ -23,117 +20,132 @@ class ImageService
 {
     public const string DISK = 'r2';
 
-    public const int MAX_PIXEL_COUNT = 16_000_000;
+    public const int MAX_IMAGE_BYTES = 512 * 1024;
 
-    public const int MAX_DIMENSION = 8_192;
-
-    public const int OUTPUT_MAX_DIMENSION = 2_400;
-
-    public const int MAX_OUTPUT_BYTES = 3 * 1024 * 1024;
-
-    public const int MAX_SOURCE_BYTES = 30 * 1024 * 1024;
-
-    private const array SUPPORTED_MIME_TYPES = [
-        ImageUploadTypeEnum::JPEG,
-        ImageUploadTypeEnum::PNG,
-        ImageUploadTypeEnum::GIF,
-        ImageUploadTypeEnum::WEBP,
-        ImageUploadTypeEnum::AVIF,
-        ImageUploadTypeEnum::BMP,
-    ];
-
-    public function __construct(private readonly ImageManager $manager) {}
+    public const int MAX_DIMENSION = 1280;
 
     public function upload(
         UploadedFile $file,
         string $folder = '',
         string $errorField = 'image',
         string $diskName = self::DISK,
+        ImagePurposeEnum $purpose = ImagePurposeEnum::Product,
     ): string {
+        $this->validateFile($file, $purpose, $errorField);
+        $stream = fopen($file->getRealPath(), 'rb');
+        if ($stream === false) {
+            throw ValidationException::withMessages([$errorField => 'Không thể đọc tệp ảnh tải lên.']);
+        }
         try {
-            $webpContent = $this->convertToWebp($file);
-            $path = collect([trim($folder, '/'), Str::uuid().'.webp'])
-                ->filter()
-                ->implode('/');
-
-            if (! $this->disk($diskName)->put($path, $webpContent, [
-                'ContentType' => 'image/webp',
-            ])) {
+            $path = collect([trim($folder, '/'), Str::uuid().'.webp'])->filter()->implode('/');
+            if (! $this->writeStream($path, $stream, $diskName)) {
                 throw new RuntimeException('R2 từ chối ghi tệp.');
             }
 
             return $path;
-        } catch (ValidationException $exception) {
-            throw $exception;
         } catch (Throwable $exception) {
             report($exception);
-
             throw ValidationException::withMessages([
                 $errorField => 'Không thể tải ảnh lên kho lưu trữ. Vui lòng thử lại sau.',
             ]);
+        } finally {
+            fclose($stream);
         }
     }
 
-    public function convertToWebp(UploadedFile $file, int $quality = 75): string
+    public function validateFile(UploadedFile $file, ImagePurposeEnum $purpose = ImagePurposeEnum::Product, string $errorField = 'image'): void
     {
-        $this->assertSafeSourceSize((int) $file->getSize());
-
-        if (! in_array($file->getMimeType(), self::SUPPORTED_MIME_TYPES, strict: true)) {
-            throw new ImageDecoderException(
-                "Không hỗ trợ định dạng hình ảnh [{$file->getMimeType()}]. Định dạng hỗ trợ: "
-                    .implode(', ', self::SUPPORTED_MIME_TYPES),
-            );
+        $stream = fopen($file->getRealPath(), 'rb');
+        if ($stream === false) {
+            throw ValidationException::withMessages([$errorField => 'Không thể đọc tệp ảnh tải lên.']);
         }
-
-        $imageInfo = @getimagesize($file->getRealPath());
-
-        if (! is_array($imageInfo)) {
-            throw new ImageDecoderException('Không thể đọc kích thước hình ảnh tải lên.');
+        try {
+            $size = (int) $file->getSize();
+            if (($stat = fstat($stream)) === false || $stat['size'] !== $size) {
+                throw ValidationException::withMessages([$errorField => 'Kích thước tệp ảnh không khớp.']);
+            }
+            $this->validateStream($stream, $size, $purpose, $errorField);
+        } finally {
+            fclose($stream);
         }
-
-        $this->assertSafeDimensions((int) $imageInfo[0], (int) $imageInfo[1], (int) $file->getSize());
-
-        $encoded = (string) $this->manager
-            ->decodeSplFileInfo($file)
-            ->removeAnimation()
-            ->scaleDown(self::OUTPUT_MAX_DIMENSION, self::OUTPUT_MAX_DIMENSION)
-            ->encode(new WebpEncoder($quality));
-
-        return $this->assertSafeEncodedSize($encoded);
     }
 
-    public function normalizeWebpBinary(string $content, int $quality = 75): string
+    /**
+     * Validate the bounded WebP container and dimensions without decoding pixels.
+     *
+     * @param  resource  $stream  A seekable stream, rewound before and after validation.
+     */
+    public function validateStream($stream, int $size, ImagePurposeEnum $purpose = ImagePurposeEnum::Product, string $errorField = 'image'): void
     {
-        $this->assertSafeSourceSize(strlen($content));
-
-        $imageInfo = @getimagesizefromstring($content);
-
-        if (! is_array($imageInfo) || ($imageInfo['mime'] ?? null) !== ImageUploadTypeEnum::WEBP) {
-            throw new ImageDecoderException('Nội dung tải lên không phải là ảnh WebP hợp lệ.');
+        $invalid = static function (string $message) use ($errorField): never {
+            throw ValidationException::withMessages([$errorField => $message]);
+        };
+        if ($size < 1 || $size > $purpose->maxKilobytes() * 1024) {
+            $invalid('Ảnh đã xử lý phải có kích thước từ 1 byte đến '.$purpose->maxKilobytes().' KB.');
         }
-
-        return $this->normalizeBinary($content, $quality);
-    }
-
-    public function normalizeBinary(string $content, int $quality = 75): string
-    {
-        $this->assertSafeSourceSize(strlen($content));
-
-        $imageInfo = @getimagesizefromstring($content);
-
-        if (! is_array($imageInfo) || ! in_array($imageInfo['mime'] ?? null, self::SUPPORTED_MIME_TYPES, true)) {
-            throw new ImageDecoderException('Nội dung tải lên không phải là hình ảnh hợp lệ.');
+        try {
+            rewind($stream);
+            $header = fread($stream, 12);
+            if (strlen($header) !== 12 || substr($header, 0, 4) !== 'RIFF' || substr($header, 8, 4) !== 'WEBP'
+                || unpack('V', substr($header, 4, 4))[1] !== $size - 8) {
+                $invalid('Vui lòng gửi ảnh WebP tĩnh đã được xử lý trên thiết bị.');
+            }
+            $imageDimensions = null;
+            $canvasDimensions = null;
+            $position = 12;
+            while ($position < $size) {
+                $chunk = fread($stream, 8);
+                if (strlen($chunk) !== 8) {
+                    $invalid('Cấu trúc ảnh WebP không hợp lệ.');
+                }
+                $type = substr($chunk, 0, 4);
+                $length = unpack('V', substr($chunk, 4, 4))[1];
+                $position += 8;
+                $next = $position + $length + ($length % 2);
+                if ($next > $size || in_array($type, ['ANIM', 'ANMF'], true)) {
+                    $invalid('Ảnh WebP phải là ảnh tĩnh và có cấu trúc đầy đủ.');
+                }
+                $data = $length > 0 ? fread($stream, min(10, $length)) : '';
+                if ($type === 'VP8X') {
+                    if ($position !== 20 || $length !== 10 || (ord($data[0]) & 0xC3) !== 0 || substr($data, 1, 3) !== "\0\0\0") {
+                        $invalid('Ảnh WebP phải là ảnh tĩnh và có cấu trúc đầy đủ.');
+                    }
+                    $canvasDimensions = [1 + unpack('V', substr($data, 4, 3)."\0")[1], 1 + unpack('V', substr($data, 7, 3)."\0")[1]];
+                } elseif ($type === 'VP8 ' || $type === 'VP8L') {
+                    if ($imageDimensions !== null) {
+                        $invalid('Ảnh WebP chỉ được chứa một khung hình tĩnh.');
+                    }
+                    if ($type === 'VP8 ') {
+                        if ($length < 10 || (ord($data[0]) & 1) !== 0 || substr($data, 3, 3) !== "\x9d\x01\x2a") {
+                            $invalid('Cấu trúc ảnh WebP không hợp lệ.');
+                        }
+                        $imageDimensions = [unpack('v', substr($data, 6, 2))[1] & 0x3FFF, unpack('v', substr($data, 8, 2))[1] & 0x3FFF];
+                    } else {
+                        if ($length < 5 || $data[0] !== "\x2f") {
+                            $invalid('Cấu trúc ảnh WebP không hợp lệ.');
+                        }
+                        $bits = unpack('V', substr($data, 1, 4))[1];
+                        if (($bits & 0xE0000000) !== 0) {
+                            $invalid('Cấu trúc ảnh WebP không hợp lệ.');
+                        }
+                        $imageDimensions = [1 + ($bits & 0x3FFF), 1 + (($bits >> 14) & 0x3FFF)];
+                    }
+                }
+                if (fseek($stream, $next) !== 0) {
+                    $invalid('Không thể đọc cấu trúc ảnh WebP.');
+                }
+                $position = $next;
+            }
+            if ($imageDimensions === null || ($canvasDimensions !== null && $canvasDimensions !== $imageDimensions)) {
+                $invalid('Cấu trúc ảnh WebP không hợp lệ.');
+            }
+            $maximum = $purpose === ImagePurposeEnum::Avatar ? 640 : self::MAX_DIMENSION;
+            if (min($imageDimensions) < 1 || max($imageDimensions) > $maximum) {
+                $invalid('Ảnh đã xử lý không được vượt quá '.$maximum.' pixel mỗi chiều.');
+            }
+        } finally {
+            rewind($stream);
         }
-
-        $this->assertSafeDimensions((int) $imageInfo[0], (int) $imageInfo[1], strlen($content));
-
-        $encoded = (string) $this->manager
-            ->decodeBinary($content)
-            ->removeAnimation()
-            ->scaleDown(self::OUTPUT_MAX_DIMENSION, self::OUTPUT_MAX_DIMENSION)
-            ->encode(new WebpEncoder($quality));
-
-        return $this->assertSafeEncodedSize($encoded);
     }
 
     public function defaultAvatar(): string
@@ -285,9 +297,12 @@ class ImageService
         );
     }
 
-    public function write(string $path, string $content): bool
+    /** @param resource $stream */
+    public function writeStream(string $path, $stream, string $diskName = self::DISK): bool
     {
-        return $this->disk()->put($this->requiredStoragePath($path), $content, [
+        rewind($stream);
+
+        return $this->disk($diskName)->put($this->requiredStoragePath($path), $stream, [
             'ContentType' => 'image/webp',
         ]);
     }
@@ -363,52 +378,5 @@ class ImageService
         return Str::startsWith($path, $prefix)
             ? ltrim(Str::after($path, $prefix), '/')
             : null;
-    }
-
-    private function assertSafeSourceSize(int $size): void
-    {
-        if ($size < 1 || $size > self::MAX_SOURCE_BYTES) {
-            throw new ImageDecoderException('Ảnh tải lên phải có kích thước từ 1 byte đến 30 MB.');
-        }
-    }
-
-    public static function assertMemoryBudget(int $width, int $height, int $sourceBytes): void
-    {
-        $memoryLimit = ini_parse_quantity((string) ini_get('memory_limit'));
-
-        if ($memoryLimit < 0) {
-            return;
-        }
-
-        // Allow for a decoded raster, a transformed copy, input buffers, and framework work.
-        $requiredBytes = $width * $height * 8 + $sourceBytes * 2 + 8 * 1024 * 1024;
-
-        if ($requiredBytes > $memoryLimit - memory_get_usage(true)) {
-            throw new ImageDecoderException('Ảnh cần quá nhiều bộ nhớ để xử lý. Vui lòng giảm kích thước hoặc độ phân giải ảnh rồi thử lại.');
-        }
-    }
-
-    private function assertSafeDimensions(int $width, int $height, int $sourceBytes): void
-    {
-        if (
-            $width < 1
-            || $height < 1
-            || $width > self::MAX_DIMENSION
-            || $height > self::MAX_DIMENSION
-            || $width * $height > self::MAX_PIXEL_COUNT
-        ) {
-            throw new ImageDecoderException('Kích thước hoặc tổng số điểm ảnh vượt quá giới hạn an toàn.');
-        }
-
-        self::assertMemoryBudget($width, $height, $sourceBytes);
-    }
-
-    private function assertSafeEncodedSize(string $content): string
-    {
-        if (strlen($content) > self::MAX_OUTPUT_BYTES) {
-            throw new ImageDecoderException('Ảnh sau khi chuẩn hóa vượt quá giới hạn 3 MB.');
-        }
-
-        return $content;
     }
 }

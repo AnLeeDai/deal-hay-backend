@@ -15,8 +15,8 @@ it('accepts the complete product catalog payload', function (): void {
     $shop = User::factory()->shopOwner()->create();
     $category = ProductCategory::factory()->create();
     $token = $shop->createToken('shop-product-create-test')->plainTextToken;
-    $primaryImage = UploadedFile::fake()->image('primary.jpg');
-    $galleryImage = UploadedFile::fake()->image('gallery.webp');
+    $primaryImage = preparedImage('primary.webp');
+    $galleryImage = preparedImage('gallery.webp');
     $product = ShopProduct::factory()
         ->for($shop, 'shopOwner')
         ->for($category, 'productCategory')
@@ -110,7 +110,7 @@ it('rejects a non-image product upload', function (): void {
         ->assertJsonValidationErrors('image')
         ->assertJsonPath(
             'errors.image.0',
-            'Tệp ảnh đại diện không phải là hình ảnh hợp lệ.',
+            'Ảnh đại diện phải là WebP tĩnh đã được xử lý trên thiết bị.',
         );
     $this->assertDatabaseCount('shop_products', 0);
 });
@@ -126,7 +126,7 @@ it('persists explicit variant selections and exposes active variants with their 
         'category' => $category->name,
         'price' => 50_000,
         'stock' => 99,
-        'image' => UploadedFile::fake()->image('product.jpg'),
+        'image' => preparedImage('product.webp'),
         'options' => [
             ['name' => ' Màu  sắc ', 'values' => ['Đen', 'Trắng']],
             ['name' => 'Kích thước', 'values' => ['S', 'M']],
@@ -249,7 +249,7 @@ it('returns 422 for duplicate variant combinations after normalizing their names
         'category' => $category->name,
         'price' => 50_000,
         'stock' => 0,
-        'image' => UploadedFile::fake()->image('product.jpg'),
+        'image' => preparedImage('product.webp'),
         'options' => [['name' => 'Màu sắc', 'values' => ['Đen']]],
         'variants' => [
             ['option_values' => ['Màu sắc' => 'Đen'], 'stock' => 1, 'is_active' => true],

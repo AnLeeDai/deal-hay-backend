@@ -4,7 +4,7 @@ use App\Console\Commands\ServeCommand;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Process\Process;
 
-it('starts PHP with limits accepting 51 image parts and a 32 MiB product payload', function (): void {
+it('starts PHP with limits accepting 51 processed images and 3 MiB chat files', function (): void {
     $command = new class extends ServeCommand
     {
         public function phpCommand(): array
@@ -25,8 +25,8 @@ it('starts PHP with limits accepting 51 image parts and a 32 MiB product payload
 
     expect(json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR))->toBe([
         'files' => 51,
-        'post_bytes' => 41_943_040,
-        'source_bytes' => 31_457_280,
-        'memory_bytes' => 268_435_456,
+        'post_bytes' => 33_554_432,
+        'source_bytes' => 3_145_728,
+        'memory_bytes' => 134_217_728,
     ]);
 });

@@ -149,9 +149,9 @@ Các API được giảm dữ liệu/truy vấn mà vẫn tính số liệu hi�
 
 Sau khi cập nhật code, **rebuild và redeploy** image để áp dụng PHP/Caddy/Supervisor; chỉ chạy `config:cache` không áp dụng các cấu hình này. Không cần migration mới cho phần tối ưu. Với Render cấu hình thủ công, đặt `DEPLOY_ROLE=web-worker`, `REFERENCE_CACHE_STORE=file`, và `CACHE_LIMITER_STORE=file` khi API chỉ có một instance. Entrypoint tự đặt các giá trị còn lại và chạy `optimize`.
 
-Trước khi giải mã ảnh, backend ước lượng bộ nhớ cần dùng theo số điểm ảnh, dung lượng tệp và bộ nhớ PHP còn trống. Ảnh vượt ngân sách sẽ bị từ chối trước bước giải mã. Luồng tải ảnh qua trình duyệt trả lỗi validation yêu cầu giảm độ phân giải; các luồng upload khác giữ thông báo lỗi hiện có. Vì vậy ảnh camera lớn từng xử lý được ở 256 MB có thể bị từ chối ở 128 MB; giới hạn định dạng và số điểm ảnh tối đa vẫn được giữ. Đây là ước lượng bảo thủ, không bảo đảm toàn bộ native memory.
+Giải mã, xoay theo hướng ảnh, chuyển ảnh động thành ảnh tĩnh, thu nhỏ và nén WebP đều chạy trên trình duyệt. Backend chỉ kiểm tra nhẹ header, định dạng và dung lượng ảnh WebP đã chuẩn bị, ghi nguyên byte vào R2 và lưu tham chiếu trong database; không giải mã hoặc mã hóa lại ảnh. `ImageService` chỉ còn trách nhiệm lưu trữ; ImageManager, Intervention và các extension GD/EXIF đã được bỏ khỏi cấu hình backend/Docker.
 
-Đây là cấu hình khởi điểm cho tài nguyên nhỏ, chưa phải kết quả benchmark ở quota thực. Cần theo dõi RAM toàn container, CPU throttling, độ trễ p95 và backlog queue với DB production. Không tăng số luồng hoặc worker trước khi đo RAM còn trống; xử lý ảnh camera lớn có thể tạo đỉnh RAM cao. Giới hạn bộ nhớ PHP không bao gồm toàn bộ bộ nhớ native và tiến trình nền. Đặt API và DB cùng region khi có thể để giảm thời gian mỗi lượt truy vấn.
+Đây là cấu hình khởi điểm cho tài nguyên nhỏ, chưa phải kết quả benchmark ở quota thực. Cần theo dõi RAM toàn container, CPU throttling, độ trễ p95 và backlog queue với DB production. Không tăng số luồng hoặc worker trước khi đo RAM còn trống. Giới hạn bộ nhớ PHP không bao gồm toàn bộ bộ nhớ native và tiến trình nền. Đặt API và DB cùng region khi có thể để giảm thời gian mỗi lượt truy vấn.
 
 Nếu đang dùng **Free**, giữ hai Docker **Web Service** hiện tại: `deal-hay-backend` và `deal-hay-reverb`. API chạy thêm queue và scheduler bằng `DEPLOY_ROLE=web-worker`. Render không có Background Worker miễn phí; pre-deploy command chỉ có trên compute trả phí. Xem [Render Free](https://render.com/docs/free) và [pre-deploy command](https://render.com/docs/deploys#pre-deploy-command).
 
@@ -317,7 +317,7 @@ Redeploy all three services after updating environment variables. The API's `/up
 
 Check `https://deal-hay-backend.onrender.com/ready` after deploying. It returns HTTP `200` with `status: ok` when database, cache, outbox worker, and Reverb checks pass, or HTTP `503` with `status: degraded` and the failed checks. Keep Render's API health check at `/up` so a worker/realtime outage does not prevent the API from deploying.
 
-If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPLOY_ROLE=worker`, and confirm its `DB_URL`, `CACHE_STORE`, and `CACHE_PREFIX` match the API. Supervisor runs a dedicated `realtime` worker (`php artisan queue:work database_outbox --queue=realtime --sleep=0.1`) alongside the `images,default` worker, so image processing does not delay notifications or chat. Set `DB_OUTBOX_QUEUE` consistently if using a different realtime queue name. The realtime worker records the outbox heartbeat; a worker started on the ordinary `database` queue connection does not. A stopped worker is reported within two minutes. If `reverb` fails, check the publisher hostname/port and matching Reverb credentials/origins.
+If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPLOY_ROLE=worker`, and confirm its `DB_URL`, `CACHE_STORE`, and `CACHE_PREFIX` match the API. Supervisor runs a dedicated `realtime` worker (`php artisan queue:work database_outbox --queue=realtime --sleep=0.1`) alongside the `images,default` worker, so image cleanup does not delay notifications or chat. The `images` queue name is retained for storage cleanup; it no longer transforms images. Set `DB_OUTBOX_QUEUE` consistently if using a different realtime queue name. The realtime worker records the outbox heartbeat; a worker started on the ordinary `database` queue connection does not. A stopped worker is reported within two minutes. If `reverb` fails, check the publisher hostname/port and matching Reverb credentials/origins.
 
 ### Deploy with the Blueprint
 
@@ -354,11 +354,15 @@ The configured pre-deploy command and background worker require paid Render comp
 
 ### Upload nhiều ảnh và tiến độ
 
-Frontend thu nhỏ ảnh trên trình duyệt trước khi xin token xử lý: cạnh dài tối đa 1280 px, avatar 640 px; chỉ giải mã một ảnh cùng lúc và gửi tối đa hai ảnh đồng thời. Thumbnail xem trước cũng được thu nhỏ để tránh giữ nhiều ảnh camera đã giải mã trong RAM trình duyệt. Backend vẫn xác thực tệp, chuẩn hóa ảnh WebP tối đa 20 KB và kiểm tra ngân sách bộ nhớ.
+Frontend thực hiện toàn bộ xử lý ảnh trên trình duyệt: giải mã, xoay theo hướng ảnh, lấy một khung hình tĩnh, thu nhỏ và nén WebP. Ảnh sản phẩm có ngân sách **512 KiB (524.288 byte)** mỗi ảnh để giữ chi tiết sản phẩm; avatar, ảnh đánh giá và ảnh chat tối đa **20 KiB (20.480 byte)** mỗi ảnh. Cạnh dài tối đa 1280 px, riêng avatar 640 px; có thể giảm thêm kích thước để đạt ngân sách dung lượng tương ứng. Chỉ giải mã một ảnh cùng lúc và gửi tối đa hai ảnh đồng thời. Thumbnail xem trước cũng được thu nhỏ để tránh giữ nhiều ảnh camera đã giải mã trong RAM trình duyệt. Nếu trình duyệt không giải mã hoặc xuất WebP được, biểu mẫu báo lỗi; ảnh gốc không được gửi sang backend để xử lý thay.
 
-Một sản phẩm nhận tối đa 50 ảnh bổ sung, mỗi ảnh gốc tối đa 30 MB. Sau chuẩn hóa, biểu mẫu gửi các ảnh nhỏ tới server action để lưu. Danh sách ảnh gallery được thêm/xóa bằng truy vấn theo lô để giảm thời gian chờ DB; việc ghi ảnh tới R2 vẫn có thể kéo dài khi mạng chậm. Không tăng số worker/luồng PHP chỉ để tăng số ảnh tải đồng thời.
+Một sản phẩm nhận tối đa 50 ảnh bổ sung và một ảnh chính, mỗi ảnh gốc chọn trên trình duyệt tối đa 30 MiB. Trình duyệt chuẩn bị WebP trước, khai báo một lô rồi gửi từng ảnh qua `/api/live/uploads/images/prepare` tới Laravel `/private/uploads/images/prepare`; request lưu sản phẩm chỉ gửi token ảnh đã lưu. Avatar, ảnh đánh giá và ảnh chat cũng được chuẩn bị tại trình duyệt trước khi gửi. Backend kiểm tra header/dung lượng của WebP tĩnh cuối cùng, ghi nguyên nội dung vào R2 và lưu tham chiếu ảnh trong database. Không còn grant hoặc endpoint chuyển đổi ảnh ở backend. Quyền sở hữu token ảnh tạm, quota, khóa chống sử dụng trùng, retry và dọn ảnh tạm/ảnh thay thế vẫn được giữ. Danh sách ảnh gallery được thêm/xóa bằng truy vấn theo lô để giảm thời gian chờ DB.
 
-Giao diện hiển thị phần trăm theo dữ liệu thực từ XHR, từng ảnh và cả đợt, kèm giai đoạn thu nhỏ/gửi/xử lý/lưu. Khi lỗi, biểu mẫu giữ lựa chọn để người dùng thử lại; các request ảnh còn lại của đợt được hủy. `CORS_MAX_AGE=600` cho phép trình duyệt dùng lại preflight 10 phút; danh sách origins và kiểm tra token vẫn giữ nguyên.
+PHP dùng `upload_max_filesize=3M`, `post_max_size=32M` và `max_file_uploads=51` cho cả Docker và `php artisan serve`. Mức này vẫn nhận tệp chat không phải ảnh tối đa 3 MiB hoặc lô multipart gồm 51 WebP sản phẩm tối đa 512 KiB mỗi ảnh. Luồng tạo sản phẩm trên frontend vẫn gửi từng ảnh qua staging, tối đa hai yêu cầu đồng thời. Giới hạn 30 MiB chỉ áp dụng ảnh gốc tại trình duyệt. Bộ nhớ PHP mặc định cho server phát triển và production đều là 128 MB.
+
+Giao diện hiển thị phần trăm theo dữ liệu thực từ XHR, từng ảnh và cả đợt, kèm giai đoạn chuẩn bị/gửi/lưu. Chỉ xác nhận hoàn tất sau khi backend phản hồi đã lưu. Khi lỗi, biểu mẫu giữ lựa chọn để người dùng thử lại; các request ảnh còn lại của đợt được hủy. `CORS_MAX_AGE=600` cho phép trình duyệt dùng lại preflight 10 phút; danh sách origins và kiểm tra token vẫn giữ nguyên.
+
+Triển khai frontend và backend cùng phiên bản, rebuild Docker để bỏ thư viện xử lý ảnh và khởi động lại worker. Không cần migration database cho thay đổi này; tham chiếu và URL ảnh cũ vẫn dùng được. Backend trả `422` nếu client cũ gửi ảnh gốc hoặc ảnh chưa đạt hợp đồng WebP cuối cùng.
 
 ### Trang Độ trễ trên header
 
@@ -396,7 +400,7 @@ Mở phiên rồi quét bằng máy quét có Enter/Tab hoặc camera trên HTTP
 
 Có thể chốt biên bản giữ tồn hoặc chốt và cập nhật tồn theo đúng các mã thiếu/thừa. Cập nhật tồn chỉ thực hiện khi số lượng, danh sách mã và lịch sử biến động còn khớp mốc đầu phiên, tránh ghi đè đơn hàng phát sinh. Xuất CSV tải đủ các trang mã và kiểm tra phiên không thay đổi giữa lúc xuất. Các phiên cũ được giữ ở chế độ số lượng gộp, không tự suy ra công nợ lịch sử; mở phiên mới để kiểm theo từng mã.
 
-Tạo sản phẩm chuẩn bị tối đa 50 ảnh thư viện cùng một ảnh chính ở trình duyệt, khai báo một lô rồi tải tối đa hai ảnh đồng thời. Request lưu sản phẩm chỉ gửi mã ảnh đã chuẩn bị. Token ảnh thuộc từng tài khoản và có thể retry khi lượt tải đang bận; không gửi toàn bộ thư viện ảnh trong một request lưu sản phẩm.
+Tạo sản phẩm chuẩn bị tối đa 50 ảnh thư viện cùng một ảnh chính thành WebP tĩnh tối đa 512 KiB mỗi ảnh ở trình duyệt, khai báo một lô rồi tải tối đa hai ảnh đồng thời. Request lưu sản phẩm chỉ gửi mã ảnh đã lưu. Token ảnh thuộc từng tài khoản và có thể retry khi lượt tải đang bận; không gửi toàn bộ thư viện ảnh trong một request lưu sản phẩm.
 
 ## Useful commands
 

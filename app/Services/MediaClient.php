@@ -48,11 +48,26 @@ class MediaClient
 
     public function url(?string $path): ?string
     {
-        if (! $path || Str::startsWith($path, ['http://', 'https://'])) {
-            return $path ?: null;
+        if (! $path) {
+            return null;
+        }
+        if (Str::startsWith($path, ['http://', 'https://'])) {
+            $url = parse_url($path);
+            $applicationHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+            if (is_array($url) && isset($url['host'], $url['path']) && $applicationHost !== null
+                && strcasecmp($url['host'], $applicationHost) === 0) {
+                if (Str::startsWith($url['path'], '/api/media/assets/')) {
+                    return $url['path'];
+                }
+                if (Str::startsWith($url['path'], '/storage/r2/')) {
+                    return '/api/media/assets/'.Str::after($url['path'], '/storage/r2/');
+                }
+            }
+
+            return $path;
         }
 
-        return route('media.asset', ['path' => ltrim($path, '/')]);
+        return route('media.asset', ['path' => ltrim($path, '/')], absolute: false);
     }
 
     public function assetUrl(string $path): ?string

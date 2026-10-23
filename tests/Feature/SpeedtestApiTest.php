@@ -3,8 +3,11 @@
 use App\Models\User;
 use App\Services\SpeedtestSession;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 
 function speedtestGrant(): array
@@ -66,7 +69,11 @@ it('streams exact incompressible download bytes without caching or database and 
     Storage::shouldReceive('disk')->never();
     $this->withToken($token)->getJson('/api/diagnostics/speedtest/ping')->assertNoContent()
         ->assertHeader('Cache-Control', 'max-age=0, must-revalidate, no-cache, no-store, no-transform, private')
-        ->assertHeader('Pragma', 'no-cache')->assertHeader('Expires', '0');
+        ->assertHeader('Pragma', 'no-cache')->assertHeader('Expires', '0')
+        ->assertHeaderContains('Server-Timing', 'app;dur=')
+        ->assertHeaderContains('Server-Timing', 'db;dur=0.00')
+        ->assertHeaderContains('Server-Timing', 'lock;dur=')
+        ->assertHeaderContains('Server-Timing', 'cache;dur=');
     $response = $this->withToken($token)->get('/api/diagnostics/speedtest/download?bytes=65536')
         ->assertOk()->assertHeader('Content-Type', 'application/octet-stream')->assertHeader('Content-Length', '65536')
         ->assertHeader('Content-Encoding', 'identity')->assertHeader('X-Speedtest-Bytes', '65536');
@@ -168,4 +175,72 @@ it('supports authenticated cross origin probes and preflights from the configure
         ->assertHeader('Timing-Allow-Origin', 'https://frontend.example.test');
     $this->assertTrue(in_array('X-Speedtest-Bytes', config('cors.exposed_headers'), true));
     $this->assertTrue(in_array('Content-Encoding', config('cors.exposed_headers'), true));
+    $this->assertTrue(in_array('Server-Timing', config('cors.exposed_headers'), true));
+});
+
+it('keeps probes off the remote SQL cache when the global cache and limiter use database', function (): void {
+    $path = sys_get_temp_dir().'/deal-hay-speedtest-'.Str::uuid();
+    config()->set([
+        'cache.default' => 'database', 'cache.limiter' => 'database',
+        'cache.stores.speedtest_test_file' => ['driver' => 'file', 'path' => $path, 'lock_path' => $path],
+        'speedtest.cache_store' => 'speedtest_test_file',
+    ]);
+
+    try {
+        $queries = [];
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+        $token = speedtestGrant()['token'];
+        $this->withToken($token)->get('/api/diagnostics/speedtest/ping')->assertNoContent()
+            ->assertHeaderContains('Server-Timing', 'db;dur=0.00');
+        $download = $this->withToken($token)->get('/api/diagnostics/speedtest/download', ['X-Speedtest-Bytes' => '1024'])
+            ->assertOk()->assertHeaderContains('Server-Timing', 'db;dur=0.00');
+        expect(strlen($download->streamedContent()))->toBe(1024);
+        $this->call('POST', '/api/diagnostics/speedtest/upload', server: [
+            'HTTP_AUTHORIZATION' => 'Bearer '.$token, 'CONTENT_TYPE' => 'application/octet-stream', 'CONTENT_LENGTH' => 3,
+        ], content: 'abc')->assertOk()->assertExactJson(['received_bytes' => 3]);
+        expect($queries)->toBeEmpty();
+        expect(config('cache.default'))->toBe('database');
+        expect(config('cache.limiter'))->toBe('database');
+    } finally {
+        Cache::forgetDriver('speedtest_test_file');
+        (new Filesystem)->deleteDirectory($path);
+    }
+});
+
+it('supports a shared probe cache and reports SQL work without exposing server configuration', function (): void {
+    config()->set('speedtest.cache_store', 'database');
+    $token = speedtestGrant()['token'];
+    $queries = [];
+    DB::listen(function (QueryExecuted $query) use (&$queries): void {
+        $queries[] = $query->sql;
+    });
+
+    $response = $this->withToken($token)->get('/api/diagnostics/speedtest/ping')->assertNoContent();
+    expect($queries)->not->toBeEmpty();
+    expect(implode(' ', $queries))->toContain('cache_locks')->toContain('cache');
+    $timing = $response->headers->get('Server-Timing');
+    expect($timing)->toMatch('/^app;dur=\d+\.\d{2}, db;dur=\d+\.\d{2}, lock;dur=\d+\.\d{2}, cache;dur=\d+\.\d{2}$/');
+    expect($response->getContent())->toBe('');
+    expect(request()->attributes->has('diagnostics.sql'))->toBeFalse();
+    expect(request()->attributes->has('speedtest.session_timing'))->toBeFalse();
+
+    $this->getJson('/api/shops/no-such-shop')->assertNotFound()->assertHeaderMissing('Server-Timing');
+});
+
+it('limits invalid probe traffic by IP on the dedicated store without using the global SQL cache', function (): void {
+    config()->set(['cache.default' => 'database', 'cache.limiter' => 'database']);
+    $queries = [];
+    DB::listen(function (QueryExecuted $query) use (&$queries): void {
+        $queries[] = $query->sql;
+    });
+    for ($index = 0; $index < 240; $index++) {
+        $this->getJson('/api/diagnostics/speedtest/ping')->assertUnauthorized();
+    }
+    $this->getJson('/api/diagnostics/speedtest/ping')->assertTooManyRequests()
+        ->assertHeader('Retry-After');
+    expect($queries)->toBeEmpty();
+    $this->travel(61)->seconds();
+    $this->getJson('/api/diagnostics/speedtest/ping')->assertUnauthorized();
 });

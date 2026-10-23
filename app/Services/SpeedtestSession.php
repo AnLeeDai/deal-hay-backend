@@ -42,16 +42,23 @@ class SpeedtestSession
         ];
     }
 
-    /** Reserve transfer bytes before reading a body or sending any probe data. */
-    public function consume(?string $token, int $bytes = 0): void
+    /**
+     * Reserve transfer bytes before reading a body or sending any probe data.
+     *
+     * @return array{lock_ms: float, cache_ms: float}
+     */
+    public function consume(?string $token, int $bytes = 0): array
     {
         if (! is_string($token) || strlen($token) !== 64 || ! ctype_alnum($token)) {
             $this->unauthorized();
         }
         $key = $this->key($token);
         $cache = $this->cache();
+        $startedAt = hrtime(true);
+        $acquiredAt = $startedAt;
         try {
-            $cache->lock($key.':lock', 5)->block(1, function () use ($cache, $key, $bytes): void {
+            $cache->lock($key.':lock', 5)->block(1, function () use ($cache, $key, $bytes, &$acquiredAt): void {
+                $acquiredAt = hrtime(true);
                 $grant = $cache->get($key);
                 $remaining = is_array($grant) ? (int) ($grant['expires_at'] ?? 0) - now()->getTimestamp() : 0;
                 if (! is_array($grant) || ($grant['scope'] ?? null) !== 'speedtest' || $remaining <= 0) {
@@ -67,6 +74,11 @@ class SpeedtestSession
         } catch (LockTimeoutException $exception) {
             throw new ServiceUnavailableHttpException(1, 'Phiên đo đang bận. Vui lòng thử lại.', $exception);
         }
+
+        return [
+            'lock_ms' => round(($acquiredAt - $startedAt) / 1_000_000, 2),
+            'cache_ms' => round((hrtime(true) - $acquiredAt) / 1_000_000, 2),
+        ];
     }
 
     private function key(string $token): string
@@ -76,7 +88,7 @@ class SpeedtestSession
 
     private function cache(): Repository
     {
-        return Cache::store(config('cache.limiter') ?: config('cache.default'));
+        return Cache::store((string) config('speedtest.cache_store'));
     }
 
     private function unauthorized(): never

@@ -17,6 +17,23 @@ beforeEach(function (): void {
     config()->set('filesystems.chat_media_disk', 'r2_private');
 });
 
+it('broadcasts relative public media and attachment URLs without the backend hostname', function (): void {
+    config()->set('app.url', 'https://private-api.example.test');
+    $conversation = ChatConversation::factory()->create();
+    $conversation->buyer->update(['avatar_url' => 'https://private-api.example.test/api/media/assets/owner/avatar/photo.webp']);
+    $message = ChatMessage::factory()->create([
+        'chat_conversation_id' => $conversation->getKey(),
+        'sender_id' => $conversation->buyer_id,
+        'attachment_mime' => 'image/webp',
+        'attachment_name' => 'photo.webp',
+        'attachment_size' => 100,
+    ]);
+    $payload = (new ChatMessageSentEvent($message))->broadcastWith();
+    expect($payload['attachment']['url'])->toBe('/api/chat-attachments/'.$message->getKey())
+        ->and($payload['sender']['avatar_url'])->toBe('/api/media/assets/owner/avatar/photo.webp')
+        ->and(json_encode($payload))->not->toContain('private-api.example.test');
+});
+
 it('stores file attachments under the conversation UUID on the private disk', function (): void {
     $privateDisk = Storage::fake('r2_private');
     $conversation = ChatConversation::factory()->create();
@@ -35,6 +52,7 @@ it('stores file attachments under the conversation UUID on the private disk', fu
         ->assertJsonPath('attachment.name', 'note.txt')
         ->assertJsonPath('attachment.size', 19);
     $message = ChatMessage::query()->findOrFail($response->json('id'));
+    $response->assertJsonPath('attachment.url', '/api/chat-attachments/'.$message->getKey());
     expect($message->attachment_disk)->toBe('r2_private');
     expect($message->attachment_path)->toStartWith('chat-media/'.$conversation->getKey().'/');
     $privateDisk->assertExists($message->attachment_path);

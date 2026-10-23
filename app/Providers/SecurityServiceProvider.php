@@ -32,10 +32,6 @@ class SecurityServiceProvider extends ServiceProvider
             ->by((string) ($request->user()?->getKey() ?: $request->ip())));
         RateLimiter::for('speedtest-session', fn (Request $request): Limit => Limit::perMinute(3)
             ->by((string) ($request->user()?->getKey() ?: $request->ip())));
-        RateLimiter::for('speedtest-probe', fn (Request $request): array => [
-            Limit::perMinute(120)->by('token:'.hash('sha256', (string) $request->bearerToken())),
-            Limit::perMinute(240)->by('ip:'.$request->ip()),
-        ]);
         RateLimiter::for('presence-heartbeat', fn (Request $request): Limit => Limit::perMinute(12)
             ->by((string) ($request->user()?->getKey() ?: $request->ip())));
         RateLimiter::for('start-chat', fn (Request $request): Limit => Limit::perMinute(10)

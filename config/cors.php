@@ -6,7 +6,7 @@ return [
     'allowed_origins' => array_values(array_filter(array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', env('FRONTEND_URL', 'http://localhost:3000')))))),
     'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
-    'exposed_headers' => ['X-Request-ID', 'Idempotency-Replayed', 'X-Speedtest-Bytes', 'Content-Encoding', 'Retry-After'],
+    'exposed_headers' => ['X-Request-ID', 'Idempotency-Replayed', 'X-Speedtest-Bytes', 'Content-Encoding', 'Retry-After', 'Server-Timing'],
     'max_age' => (int) env('CORS_MAX_AGE', 600),
     'supports_credentials' => false,
 ];

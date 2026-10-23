@@ -34,12 +34,13 @@ use App\Http\Controllers\ShopStocktakeController;
 use App\Http\Controllers\SpeedtestController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\UserController;
+use App\Http\Middleware\ThrottleSpeedtestProbes;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/media/assets/{path}', [MediaGatewayController::class, 'asset'])
     ->where('path', '.*')
     ->name('media.asset');
-Route::prefix('diagnostics/speedtest')->middleware('throttle:speedtest-probe')->group(function (): void {
+Route::prefix('diagnostics/speedtest')->middleware(ThrottleSpeedtestProbes::class)->group(function (): void {
     Route::get('/ping', [SpeedtestController::class, 'ping'])->name('speedtest.ping');
     Route::get('/download', [SpeedtestController::class, 'download'])->name('speedtest.download');
     Route::post('/upload', [SpeedtestController::class, 'upload'])->name('speedtest.upload');

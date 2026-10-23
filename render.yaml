@@ -14,6 +14,9 @@ services:
       - fromGroup: deal-hay-production
       - key: DEPLOY_ROLE
         value: web
+      # This Blueprint runs one API instance. Use a shared store if scaling.
+      - key: SPEEDTEST_CACHE_STORE
+        value: file
       - key: APP_URL
         fromService:
           name: deal-hay-api

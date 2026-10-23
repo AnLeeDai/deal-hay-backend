@@ -100,7 +100,7 @@ it('lists only the owners codes supports product filtering and serializes storag
     $this->getJson('/api/discount-codes?product_id='.$product->getKey())
         ->assertOk()->assertJsonCount(1, 'discount_codes')
         ->assertJsonPath('discount_codes.0.id', $code->getKey())
-        ->assertJsonPath('discount_codes.0.product.image_url', route('media.asset', ['path' => 'products/wallet-image.webp']));
+        ->assertJsonPath('discount_codes.0.product.image_url', route('media.asset', ['path' => 'products/wallet-image.webp'], absolute: false));
 });
 
 it('requires saving a code before checkout and allows using it after the source view expires', function (): void {

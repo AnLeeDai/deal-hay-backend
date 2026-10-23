@@ -127,7 +127,7 @@ class ChatPayloadService
         }
 
         return [
-            'url' => route('chats.attachments.show', $message),
+            'url' => '/api/chat-attachments/'.$message->getKey(),
             'name' => $message->attachment_name,
             'mime' => $message->attachment_mime,
             'size' => $message->attachment_size,

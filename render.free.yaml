@@ -26,6 +26,8 @@ services:
       # This Blueprint runs one API instance. Use a shared limiter store if scaling.
       - key: CACHE_LIMITER_STORE
         value: file
+      - key: SPEEDTEST_CACHE_STORE
+        value: file
       - key: RUN_MIGRATIONS
         value: "true"
       - key: APP_ENV

@@ -19,7 +19,7 @@ class SpeedtestController extends Controller
 
     public function ping(Request $request): Response
     {
-        $this->sessions->consume($request->bearerToken());
+        $this->consume($request);
 
         return response('', 204, $this->headers($request));
     }
@@ -29,10 +29,10 @@ class SpeedtestController extends Controller
         $bytes = filter_var($request->header('x-speedtest-bytes', $request->query('bytes', 1024 * 1024)), FILTER_VALIDATE_INT);
         if ($bytes === false || $bytes < 1 || $bytes > SpeedtestSession::MAX_DOWNLOAD_BYTES) {
             // Verify the scoped token even when rejecting an invalid byte count.
-            $this->sessions->consume($request->bearerToken());
+            $this->consume($request);
             abort(422, 'Dung lượng tải xuống phải từ 1 byte đến 4 MiB.');
         }
-        $this->sessions->consume($request->bearerToken(), $bytes);
+        $this->consume($request, $bytes);
 
         return response()->stream(function () use ($bytes): void {
             $remaining = $bytes;
@@ -55,7 +55,7 @@ class SpeedtestController extends Controller
         $declared = $length !== null ? filter_var($length, FILTER_VALIDATE_INT) : null;
         $safeLength = is_int($declared) && $declared >= 0 && $declared <= SpeedtestSession::MAX_UPLOAD_BYTES;
         // Reserve the full bounded read before trusting a claimed body length.
-        $this->sessions->consume($request->bearerToken(), SpeedtestSession::MAX_UPLOAD_BYTES);
+        $this->consume($request, SpeedtestSession::MAX_UPLOAD_BYTES);
         abort_if($length !== null && ! $safeLength, 413, 'Dung lượng tải lên tối đa là 2 MiB.');
         abort_unless(strtolower(trim(explode(';', (string) $request->header('content-type'))[0])) === 'application/octet-stream', 415, 'Vui lòng gửi dữ liệu đo dạng application/octet-stream.');
         $stream = $request->getContent(asResource: true);
@@ -77,6 +77,11 @@ class SpeedtestController extends Controller
         return response()->json(['received_bytes' => $received], headers: [
             ...$this->headers($request), 'X-Speedtest-Bytes' => (string) $received,
         ]);
+    }
+
+    private function consume(Request $request, int $bytes = 0): void
+    {
+        $request->attributes->set('speedtest.session_timing', $this->sessions->consume($request->bearerToken(), $bytes));
     }
 
     private function headers(Request $request): array

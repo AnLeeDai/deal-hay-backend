@@ -7,6 +7,7 @@ use App\Services\ChatAttachmentService;
 use App\Services\ImageService;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Filesystem\FilesystemManager;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -142,3 +143,33 @@ it('preserves consumed product images when expired upload records are pruned', f
     $this->assertModelMissing($upload);
     $disk->assertExists($path);
 });
+
+it('honors the pruning limit across deletion-safe pages and dry runs', function (bool $dryRun): void {
+    $this->freezeTime();
+    $user = User::factory()->customer()->create();
+    $rows = [];
+
+    foreach (range(1, 207) as $index) {
+        $rows[] = [
+            'id' => '00000000-0000-4000-8000-'.str_pad((string) $index, 12, '0', STR_PAD_LEFT),
+            'user_id' => $user->getKey(),
+            'path' => 'staged-images/'.$user->user_code.'/batch-'.$index.'.source',
+            'expected_size' => 100,
+            'expires_at' => now()->subHours(2)->subSeconds($index),
+            'consumed_at' => now()->subHours(3),
+        ];
+    }
+
+    DB::table('staged_image_uploads')->insert($rows);
+    $images = Mockery::mock(ImageService::class);
+    $images->shouldNotReceive('delete');
+    app()->instance(ImageService::class, $images);
+
+    $this->artisan('app:prune-staged-upload-records', ['--limit' => 205, '--dry-run' => $dryRun])
+        ->expectsOutputToContain('matched 205, deleted '.($dryRun ? 0 : 205).', failed 0.')
+        ->assertSuccessful();
+
+    $this->assertDatabaseCount('staged_image_uploads', $dryRun ? 207 : 2);
+    $this->assertDatabaseHas('staged_image_uploads', ['id' => $rows[205]['id']]);
+    $this->assertDatabaseHas('staged_image_uploads', ['id' => $rows[206]['id']]);
+})->with([true, false]);

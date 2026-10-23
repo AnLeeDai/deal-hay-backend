@@ -67,16 +67,28 @@ test('the combined API and worker starts from the environment or explicit role a
     'explicit role overrides environment' => [['DEPLOY_ROLE' => 'web'], ['web-worker']],
 ]);
 
-test('HTTP concurrency reserves memory for the combined worker role', function (string $role, string $threads): void {
+test('HTTP roles keep one warm Laravel worker within a bounded thread pool', function (string $role): void {
     $result = runDockerEntrypoint(['DEPLOY_ROLE' => $role]);
 
     expect($result['exit_code'])->toBe(0);
-    expect($result['runtime_environment']['FRANKENPHP_NUM_THREADS'])->toBe($threads);
-    expect($result['runtime_environment']['FRANKENPHP_MAX_THREADS'])->toBe($threads);
-})->with([
-    'HTTP service' => ['web', '2'],
-    'combined service' => ['web-worker', '1'],
-]);
+    expect($result['runtime_environment'])->toMatchArray([
+        'FRANKENPHP_NUM_THREADS' => '1',
+        'FRANKENPHP_MAX_THREADS' => '2',
+        'OCTANE_WORKERS' => '1',
+        'MAX_REQUESTS' => '500',
+        'REQUEST_MAX_EXECUTION_TIME' => '60',
+    ]);
+})->with(['web', 'web-worker']);
+
+test('HTTP thread ceiling includes every configured persistent worker', function (): void {
+    $result = runDockerEntrypoint([
+        'OCTANE_WORKERS' => '2',
+        'FRANKENPHP_NUM_THREADS' => '1',
+    ]);
+
+    expect($result['exit_code'])->toBe(0);
+    expect($result['runtime_environment']['FRANKENPHP_MAX_THREADS'])->toBe('3');
+});
 
 test('worker roles receive bounded memory and recycling defaults', function (string $role): void {
     $result = runDockerEntrypoint(['DEPLOY_ROLE' => $role]);
@@ -88,6 +100,7 @@ test('worker roles receive bounded memory and recycling defaults', function (str
         'QUEUE_MEMORY_LIMIT' => '128M',
         'QUEUE_MAX_JOBS' => '500',
         'QUEUE_MAX_TIME' => '3600',
+        'REALTIME_QUEUE_SLEEP' => '0.25',
     ]);
 })->with(['worker', 'web-worker']);
 
@@ -95,6 +108,10 @@ test('runtime limits can be tuned explicitly for larger deployments', function (
     $limits = [
         'FRANKENPHP_NUM_THREADS' => '3',
         'FRANKENPHP_MAX_THREADS' => '4',
+        'OCTANE_WORKERS' => '1',
+        'MAX_REQUESTS' => '1000',
+        'REQUEST_MAX_EXECUTION_TIME' => '45',
+        'REALTIME_QUEUE_SLEEP' => '0.5',
         'QUEUE_SLEEP' => '5',
         'QUEUE_MEMORY' => '192',
         'QUEUE_MEMORY_LIMIT' => '256M',
@@ -104,7 +121,7 @@ test('runtime limits can be tuned explicitly for larger deployments', function (
     $result = runDockerEntrypoint(['DEPLOY_ROLE' => 'web-worker', ...$limits]);
 
     expect($result['exit_code'])->toBe(0);
-    expect($result['runtime_environment'])->toBe($limits);
+    expect($result['runtime_environment'])->toEqual($limits);
 });
 
 test('invalid runtime limits fail before service startup', function (array $limits, string $variable): void {
@@ -116,7 +133,14 @@ test('invalid runtime limits fail before service startup', function (array $limi
 })->with([
     'zero HTTP threads' => [['FRANKENPHP_NUM_THREADS' => '0'], 'FRANKENPHP_NUM_THREADS'],
     'HTTP maximum below initial threads' => [['FRANKENPHP_NUM_THREADS' => '3', 'FRANKENPHP_MAX_THREADS' => '2'], 'FRANKENPHP_MAX_THREADS'],
+    'HTTP maximum leaves no worker thread' => [['FRANKENPHP_NUM_THREADS' => '1', 'FRANKENPHP_MAX_THREADS' => '1'], 'FRANKENPHP_MAX_THREADS'],
+    'HTTP maximum excludes a second worker' => [['OCTANE_WORKERS' => '2', 'FRANKENPHP_MAX_THREADS' => '2'], 'FRANKENPHP_MAX_THREADS'],
+    'zero persistent workers' => [['OCTANE_WORKERS' => '0'], 'OCTANE_WORKERS'],
+    'unbounded requests are unsupported by the worker loop' => [['MAX_REQUESTS' => '0'], 'MAX_REQUESTS'],
+    'invalid request timeout' => [['REQUEST_MAX_EXECUTION_TIME' => 'abc'], 'REQUEST_MAX_EXECUTION_TIME'],
     'busy polling' => [['QUEUE_SLEEP' => '0'], 'QUEUE_SLEEP'],
+    'busy polling realtime' => [['REALTIME_QUEUE_SLEEP' => '0'], 'REALTIME_QUEUE_SLEEP'],
+    'invalid realtime polling' => [['REALTIME_QUEUE_SLEEP' => 'invalid'], 'REALTIME_QUEUE_SLEEP'],
     'non-numeric polling interval' => [['QUEUE_SLEEP' => 'invalid'], 'QUEUE_SLEEP'],
     'negative worker memory' => [['QUEUE_MEMORY' => '-1'], 'QUEUE_MEMORY'],
     'negative recycling interval' => [['QUEUE_MAX_TIME' => '-1'], 'QUEUE_MAX_TIME'],
@@ -252,7 +276,7 @@ function runDockerEntrypoint(array $environment = [], array $arguments = ['start
 #!/bin/sh
 set -eu
 printf '%s\t%s\t%s\n' "${0##*/} $*" "${REVERB_SERVER_HOST:-}" "${REVERB_SERVER_PORT:-}" >> "$TEST_COMMAND_LOG"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${FRANKENPHP_NUM_THREADS:-}" "${FRANKENPHP_MAX_THREADS:-}" "${QUEUE_SLEEP:-}" "${QUEUE_MEMORY:-}" "${QUEUE_MEMORY_LIMIT:-}" "${QUEUE_MAX_JOBS:-}" "${QUEUE_MAX_TIME:-}" >> "$TEST_RUNTIME_LOG"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${FRANKENPHP_NUM_THREADS:-}" "${FRANKENPHP_MAX_THREADS:-}" "${QUEUE_SLEEP:-}" "${QUEUE_MEMORY:-}" "${QUEUE_MEMORY_LIMIT:-}" "${QUEUE_MAX_JOBS:-}" "${QUEUE_MAX_TIME:-}" "${OCTANE_WORKERS:-}" "${MAX_REQUESTS:-}" "${REQUEST_MAX_EXECUTION_TIME:-}" "${REALTIME_QUEUE_SLEEP:-}" >> "$TEST_RUNTIME_LOG"
 if [ "${1:-}" = "artisan" ] && [ "${2:-}" = "${TEST_FAIL_ARTISAN_COMMAND:-}" ]; then
     exit 42
 fi
@@ -285,6 +309,10 @@ SH;
                 'TEST_FAIL_ARTISAN_COMMAND' => '',
                 'FRANKENPHP_NUM_THREADS' => false,
                 'FRANKENPHP_MAX_THREADS' => false,
+                'OCTANE_WORKERS' => false,
+                'MAX_REQUESTS' => false,
+                'REQUEST_MAX_EXECUTION_TIME' => false,
+                'REALTIME_QUEUE_SLEEP' => false,
                 'QUEUE_SLEEP' => false,
                 'QUEUE_MEMORY' => false,
                 'QUEUE_MEMORY_LIMIT' => false,
@@ -311,6 +339,10 @@ SH;
             'QUEUE_MEMORY_LIMIT',
             'QUEUE_MAX_JOBS',
             'QUEUE_MAX_TIME',
+            'OCTANE_WORKERS',
+            'MAX_REQUESTS',
+            'REQUEST_MAX_EXECUTION_TIME',
+            'REALTIME_QUEUE_SLEEP',
         ], explode("\t", end($runtimeExecutions)));
 
         foreach ($executions as $execution) {

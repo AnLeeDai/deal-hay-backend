@@ -2,13 +2,22 @@
 	auto_https off
 	admin off
 	frankenphp {
-		num_threads {$FRANKENPHP_NUM_THREADS:2}
+		# One classic thread is reserved by FrankenPHP in addition to the worker.
+		num_threads {$FRANKENPHP_NUM_THREADS:1}
 		max_threads {$FRANKENPHP_MAX_THREADS:2}
+		worker {
+			file "{$APP_PUBLIC_PATH:/app/public}/frankenphp-worker.php"
+			num {$OCTANE_WORKERS:1}
+			env APP_BASE_PATH {$APP_BASE_PATH:/app}
+			env LARAVEL_OCTANE 1
+			env MAX_REQUESTS {$MAX_REQUESTS:500}
+			env REQUEST_MAX_EXECUTION_TIME {$REQUEST_MAX_EXECUTION_TIME:60}
+		}
 	}
 }
 
 :{$PORT:10000} {
-	root * /app/public
+	root * "{$APP_PUBLIC_PATH:/app/public}"
 	encode {
 		gzip 1
 		minimum_length 1024
@@ -19,5 +28,13 @@
 		format json
 	}
 
-	php_server
+	# Explicit requests to the old front controller use the same warm worker.
+	@frontController path /index.php /index.php/*
+	rewrite @frontController /frankenphp-worker.php
+
+	php_server {
+		index frankenphp-worker.php
+		try_files {path} frankenphp-worker.php
+		resolve_root_symlink
+	}
 }

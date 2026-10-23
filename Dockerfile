@@ -2,7 +2,7 @@
 
 FROM composer:2 AS composer
 
-FROM dunglas/frankenphp:1-php8.4-bookworm
+FROM dunglas/frankenphp:1.13.3-php8.4-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends supervisor unzip \

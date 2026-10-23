@@ -125,33 +125,61 @@ Compose uses a dedicated SQLite/storage volume and local mail/media drivers. Con
 
 ### Cấu hình cho 0.5 CPU, 512 MB RAM và DB có độ trễ cao
 
-Docker mặc định giới hạn HTTP ở **1 luồng PHP khi `DEPLOY_ROLE=web-worker`**, hoặc **2 luồng khi `DEPLOY_ROLE=web`**. PHP dùng `memory_limit=128M`, OPcache 64 MB và tắt JIT. Go dùng `GOMAXPROCS=1`, `GOMEMLIMIT=64MiB`; đây là ngưỡng mềm của Go heap, không phải giới hạn RAM của cả container. HTTP nén gzip mức 1 để giảm CPU. Các giới hạn luồng theo hướng dẫn [FrankenPHP](https://frankenphp.dev/docs/performance/).
+Docker chạy **Laravel Octane với một FrankenPHP worker thường trực** cho cả `web` và `web-worker`. Laravel, routes và các dịch vụ được khởi tạo một lần khi worker bắt đầu; các request sau dùng lại ứng dụng và kết nối DB, không bootstrap Laravel lại. Caddy chạy trực tiếp worker chính thức của Octane, tránh giữ thêm một tiến trình `artisan octane:start` chỉ để quản lý HTTP. Vẫn giữ các listener mặc định của Octane để tách đăng nhập, session, context, file upload và container của từng request. Xem [vòng đời Octane](https://laravel.com/docs/13.x/octane).
 
-Một queue worker dùng PHP tối đa 128 MB, tự khởi động lại giữa các job khi vượt ngưỡng 96 MB, sau 500 job hoặc sau 1 giờ. Worker ngủ 3 giây khi queue rỗng, heartbeat ghi mỗi 30 giây. Việc này giảm truy cập DB nền; job vừa đến lúc worker đang ngủ có thể chờ thêm gần 3 giây, ngoài độ trễ DB và thời gian xử lý. Ngưỡng recycle không ngắt job đang chạy; timeout vẫn là 60 giây, nhỏ hơn `retry_after=90`. Xem [queue workers](https://laravel.com/docs/13.x/queues#running-the-queue-worker).
+Mỗi worker tự khởi tạo lại sau **500 request**, và thu gom bộ nhớ rác khi PHP dùng trên 64 MB. Đây là cơ chế giới hạn tích lũy bộ nhớ; ứng dụng không chạy vô hạn trong một worker. PHP giới hạn 128 MB, OPcache 64 MB, tắt JIT. `opcache.enable_cli=0` tránh cấp thêm bộ nhớ OPcache riêng cho mỗi queue/scheduler CLI; worker HTTP dùng SAPI FrankenPHP vẫn bật OPcache. Go dùng `GOMAXPROCS=1`, `GOMEMLIMIT=64MiB`; đây là ngưỡng mềm của Go heap, không phải giới hạn RAM cả container. HTTP nén gzip mức 1 để giảm CPU.
+
+Image ghim FrankenPHP **1.13.3**. Từ 1.13, `num_threads` là số luồng classic, worker được cộng thêm; mặc định **1 classic + 1 worker = `max_threads=2`**. Classic thread là phần dự phòng của server, các API và `/index.php` được đưa vào worker đã khởi tạo. Không tăng worker theo số CPU tự nhận diện của host: container chỉ có quota 0,5 CPU. Các giới hạn luồng theo hướng dẫn [FrankenPHP](https://frankenphp.dev/docs/performance/).
+
+Queue `images,default` dùng PHP tối đa 128 MB, tự khởi động lại giữa các job khi vượt ngưỡng 96 MB, sau 500 job hoặc sau 1 giờ. Worker ngủ 3 giây khi queue rỗng; job vừa đến có thể chờ gần 3 giây, ngoài độ trễ DB/thời gian xử lý. Queue realtime vẫn chạy riêng, mặc định poll **0,25 giây** thay vì 0,1 giây, giảm tối đa 60% lượt poll khi rỗng, thời gian chờ poll tối đa 250 ms. Heartbeat ghi mỗi 30 giây. Ngưỡng recycle không ngắt job đang chạy; timeout queue thường là 60 giây, nhỏ hơn `retry_after=90`. Xem [queue workers](https://laravel.com/docs/13.x/queues#running-the-queue-worker).
+
+Scheduler dùng vòng lặp shell nhẹ, chỉ gọi `schedule:run` ở đầu mỗi phút; không giữ thêm Laravel trong RAM suốt lúc chờ. Các khóa scheduler và lịch chạy vẫn giữ nguyên. Dọn bản ghi upload đọc từng 200 bản ghi thay vì nạp tới 10.000 model cùng lúc; dọn ảnh R2 tiếp tục đọc phân trang.
 
 Entrypoint đặt các mặc định bên dưới; có thể ghi đè bằng biến môi trường:
 
 | Biến | `web-worker` | `web` / worker riêng |
 | --- | --- | --- |
-| `FRANKENPHP_NUM_THREADS` | `1` | `2` cho `web` |
-| `FRANKENPHP_MAX_THREADS` | bằng `NUM_THREADS` | bằng `NUM_THREADS` |
+| `OCTANE_WORKERS` | `1` | `1` cho `web` |
+| `FRANKENPHP_NUM_THREADS` | `1` | `1` cho `web` |
+| `FRANKENPHP_MAX_THREADS` | `NUM_THREADS + OCTANE_WORKERS` (`2`) | tương tự |
+| `MAX_REQUESTS` | `500` | `500` cho `web` |
+| `REQUEST_MAX_EXECUTION_TIME` | `60` giây | `60` cho `web` |
 | `QUEUE_SLEEP` | `3` | `3` cho worker |
+| `REALTIME_QUEUE_SLEEP` | `0.25` giây | `0.25` cho worker; nhận `0.1`, `0.25`, `0.5`, `1` |
 | `QUEUE_MEMORY` | `96` (MB, recycle giữa job) | `96` |
 | `QUEUE_MEMORY_LIMIT` | `128M` | `128M` |
 | `QUEUE_MAX_JOBS` | `500` | `500` |
 | `QUEUE_MAX_TIME` | `3600` (giây) | `3600` |
+| `SCHEDULER_MEMORY_LIMIT` | `128M` | `128M` cho worker |
 
 `REFERENCE_CACHE_STORE=file` dành riêng cho dữ liệu tỉnh/phường, cache tối đa 24 giờ và dùng lại cho kiểm tra/định dạng địa chỉ. Sau khi cache nóng, các bước này không cần SQL tới bảng `addresses`. Khi cập nhật dữ liệu địa giới, chạy `php artisan cache:clear --store=file` trên từng API instance, hoặc đợi hết TTL. Filesystem tạm thời mất cache khi container bị thay thế; request tiếp theo tự tạo lại cache. Có thể chọn store khác qua biến này.
+
+Không nạp toàn bộ database vào RAM. Sản phẩm, giá, tồn kho, tài khoản, quyền truy cập, coupon và đơn hàng thay đổi trong lúc worker chạy; nạp một lần sẽ trả dữ liệu cũ và vượt 512 MB khi dữ liệu tăng. Giữ ứng dụng trong RAM tiết kiệm CPU bootstrap; dữ liệu thay đổi vẫn đọc/ghi DB, còn dữ liệu tham chiếu dùng cache có TTL. Không dùng `CACHE_STORE=octane`/`array` làm cache chung: bộ nhớ mỗi worker tách biệt, không thể chia sẻ khóa với queue hoặc Reverb.
 
 Giữ `CACHE_STORE=database` khi API và worker ở các service khác nhau: khóa upload, scheduler, trạng thái online và heartbeat cần dùng chung. Nếu **chỉ có một API instance**, có thể đặt `CACHE_LIMITER_STORE=file` để rate limiter tránh chờ DB. `render.free.yaml` đã bật lựa chọn này cho API đơn; bỏ biến hoặc chuyển sang store chung trước khi tăng số API instance. Không dùng `array` làm cache production.
 
 Các API được giảm dữ liệu/truy vấn mà vẫn tính số liệu hiện tại: thống kê tương tác còn 4 truy vấn cho cả khách và người đăng nhập; thống kê đánh giá và thống kê đơn hàng mỗi nhóm dùng 1 truy vấn tổng hợp; badge tin nhắn/thông báo dùng chung 1 truy vấn. Catalog/home chỉ tải 1 biến thể phù hợp để hiển thị giá cho mỗi sản phẩm; trang chi tiết vẫn tải đầy đủ biến thể. Giá, tồn kho và điều kiện đặt hàng tiếp tục được kiểm tra khi ghi đơn.
 
-Sau khi cập nhật code, **rebuild và redeploy** image để áp dụng PHP/Caddy/Supervisor; chỉ chạy `config:cache` không áp dụng các cấu hình này. Không cần migration mới cho phần tối ưu. Với Render cấu hình thủ công, đặt `DEPLOY_ROLE=web-worker`, `REFERENCE_CACHE_STORE=file`, và `CACHE_LIMITER_STORE=file` khi API chỉ có một instance. Entrypoint tự đặt các giá trị còn lại và chạy `optimize`.
+Sau khi cập nhật code, **rebuild và redeploy** image để áp dụng PHP/Caddy/Supervisor; chỉ chạy `config:cache` không áp dụng các cấu hình này. Không cần migration mới. Với Render cấu hình thủ công, đặt `DEPLOY_ROLE=web-worker`, `OCTANE_WORKERS=1`, `FRANKENPHP_NUM_THREADS=1`, **`FRANKENPHP_MAX_THREADS=2`** (thay giá trị cũ `1`), `REFERENCE_CACHE_STORE=file`, và `CACHE_LIMITER_STORE=file` khi API chỉ có một instance. Entrypoint kiểm tra số luồng, đặt các mặc định còn lại và chạy `optimize`. Mỗi lần đổi code hoặc env cần restart container/redeploy để worker nạp lại; Docker chạy Caddy trực tiếp và tắt admin API, nên không dùng `octane:reload` để quản lý container này.
 
 Giải mã, xoay theo hướng ảnh, chuyển ảnh động thành ảnh tĩnh, thu nhỏ và nén WebP đều chạy trên trình duyệt. Backend chỉ kiểm tra nhẹ header, định dạng và dung lượng ảnh WebP đã chuẩn bị, ghi nguyên byte vào R2 và lưu tham chiếu trong database; không giải mã hoặc mã hóa lại ảnh. `ImageService` chỉ còn trách nhiệm lưu trữ; ImageManager, Intervention và các extension GD/EXIF đã được bỏ khỏi cấu hình backend/Docker.
 
 Đây là cấu hình khởi điểm cho tài nguyên nhỏ, chưa phải kết quả benchmark ở quota thực. Cần theo dõi RAM toàn container, CPU throttling, độ trễ p95 và backlog queue với DB production. Không tăng số luồng hoặc worker trước khi đo RAM còn trống. Giới hạn bộ nhớ PHP không bao gồm toàn bộ bộ nhớ native và tiến trình nền. Đặt API và DB cùng region khi có thể để giảm thời gian mỗi lượt truy vấn.
+
+Kiểm tra worker và đo lại trên máy có FrankenPHP >= 1.13:
+
+```sh
+php scripts/verify-persistent-worker.php --frankenphp=/path/to/frankenphp --requests=100 --measure-queues
+```
+
+Script tạo app/SQLite/cache tạm, không dùng `.env` hay database thật. Nó kiểm tra dùng lại cùng lần boot, cách ly tài khoản A → khách → B, xóa context, đọc thay đổi DB, thu hồi token, upload multipart giữ nguyên WebP/đúng chủ sở hữu và upload sau khi recycle worker; sau đó so sánh classic/Octane trên API hồ sơ thật. Kết quả tham khảo tại máy phát triển với FrankenPHP 1.13.3/PHP 8.5.12, OPcache bật, 100 request tuần tự sau 10 request làm nóng:
+
+| Chế độ | Trung vị | p95 | RSS tiến trình HTTP |
+| --- | --- | --- | --- |
+| Classic, bootstrap mỗi request | 7,141 ms | 8,336 ms | 121,8 MiB |
+| Octane, một worker | 2,439 ms | 2,993 ms | 135,9 MiB |
+
+Trung vị nhanh hơn **2,93 lần** trong phép đo này. Phép đo thêm với hai queue rỗng ghi nhận khoảng 61 MiB RSS mỗi queue, tổng RSS HTTP + hai queue khoảng 258 MiB. DB là SQLite nội bộ và không áp quota 0,5 CPU; RSS bao gồm trang nhớ dùng chung (cộng nhiều tiến trình sẽ đếm trùng), chưa gồm Supervisor, hệ điều hành và đỉnh RAM scheduler/job. Đây không phải cam kết tốc độ hay tổng RAM của production. Image production vẫn dùng PHP 8.4; kiểm tra lại khi deploy. Octane giảm chi phí PHP/bootstrap và bắt tay DB lặp lại, còn thời gian chờ SQL, R2, frontend proxy và mạng vẫn tồn tại; dùng `Server-Timing` trên API diagnostics để tách thời gian ứng dụng và truy vấn.
 
 Nếu đang dùng **Free**, giữ hai Docker **Web Service** hiện tại: `deal-hay-backend` và `deal-hay-reverb`. API chạy thêm queue và scheduler bằng `DEPLOY_ROLE=web-worker`. Render không có Background Worker miễn phí; pre-deploy command chỉ có trên compute trả phí. Xem [Render Free](https://render.com/docs/free) và [pre-deploy command](https://render.com/docs/deploys#pre-deploy-command).
 
@@ -317,7 +345,7 @@ Redeploy all three services after updating environment variables. The API's `/up
 
 Check `https://deal-hay-backend.onrender.com/ready` after deploying. It returns HTTP `200` with `status: ok` when database, cache, outbox worker, and Reverb checks pass, or HTTP `503` with `status: degraded` and the failed checks. Keep Render's API health check at `/up` so a worker/realtime outage does not prevent the API from deploying.
 
-If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPLOY_ROLE=worker`, and confirm its `DB_URL`, `CACHE_STORE`, and `CACHE_PREFIX` match the API. Supervisor runs a dedicated `realtime` worker (`php artisan queue:work database_outbox --queue=realtime --sleep=0.1`) alongside the `images,default` worker, so image cleanup does not delay notifications or chat. The `images` queue name is retained for storage cleanup; it no longer transforms images. Set `DB_OUTBOX_QUEUE` consistently if using a different realtime queue name. The realtime worker records the outbox heartbeat; a worker started on the ordinary `database` queue connection does not. A stopped worker is reported within two minutes. If `reverb` fails, check the publisher hostname/port and matching Reverb credentials/origins.
+If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPLOY_ROLE=worker`, and confirm its `DB_URL`, `CACHE_STORE`, and `CACHE_PREFIX` match the API. Supervisor runs a dedicated `realtime` worker (`php artisan queue:work database_outbox --queue=realtime --sleep=0.25` by default) alongside the `images,default` worker, so image cleanup does not delay notifications or chat. `REALTIME_QUEUE_SLEEP` tunes its polling interval. The `images` queue name is retained for storage cleanup; it no longer transforms images. Set `DB_OUTBOX_QUEUE` consistently if using a different realtime queue name. The realtime worker records the outbox heartbeat; a worker started on the ordinary `database` queue connection does not. A stopped worker is reported within two minutes. If `reverb` fails, check the publisher hostname/port and matching Reverb credentials/origins.
 
 ### Deploy with the Blueprint
 
@@ -325,7 +353,7 @@ If `outbox_worker` fails, inspect the Background Worker's logs, verify its `DEPL
 
 - `deal-hay-api`: FrankenPHP/Caddy and Laravel HTTP; health check at `/up`.
 - `deal-hay-reverb`: standalone Reverb; health check at `/up`.
-- `deal-hay-worker`: all database queues plus `schedule:work`.
+- `deal-hay-worker`: all database queues plus the minute scheduler (`docker-scheduler.sh`).
 
 The Blueprint uses `deal-hay-api` as the API name. To adopt the existing `deal-hay-backend` service, update the API's `name` and every `fromService.name: deal-hay-api` reference to the existing service name before syncing. Preserve the existing `APP_KEY` and Reverb credentials in the shared environment group.
 

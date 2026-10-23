@@ -52,16 +52,18 @@ validate_integer() {
 
 case "$role" in
     web|web-worker)
-        default_threads=2
-
-        if [ "$role" = "web-worker" ]; then
-            default_threads=1
-        fi
-
-        export FRANKENPHP_NUM_THREADS="${FRANKENPHP_NUM_THREADS:-$default_threads}"
-        export FRANKENPHP_MAX_THREADS="${FRANKENPHP_MAX_THREADS:-$FRANKENPHP_NUM_THREADS}"
+        export OCTANE_WORKERS="${OCTANE_WORKERS:-1}"
+        export MAX_REQUESTS="${MAX_REQUESTS:-500}"
+        export REQUEST_MAX_EXECUTION_TIME="${REQUEST_MAX_EXECUTION_TIME:-60}"
+        export FRANKENPHP_NUM_THREADS="${FRANKENPHP_NUM_THREADS:-1}"
+        validate_integer OCTANE_WORKERS "$OCTANE_WORKERS" 1
+        validate_integer MAX_REQUESTS "$MAX_REQUESTS" 1
+        validate_integer REQUEST_MAX_EXECUTION_TIME "$REQUEST_MAX_EXECUTION_TIME" 1
         validate_integer FRANKENPHP_NUM_THREADS "$FRANKENPHP_NUM_THREADS" 1
-        validate_integer FRANKENPHP_MAX_THREADS "$FRANKENPHP_MAX_THREADS" "$FRANKENPHP_NUM_THREADS"
+        # FrankenPHP >= 1.13 counts worker threads on top of classic threads.
+        minimum_threads=$((FRANKENPHP_NUM_THREADS + OCTANE_WORKERS))
+        export FRANKENPHP_MAX_THREADS="${FRANKENPHP_MAX_THREADS:-$minimum_threads}"
+        validate_integer FRANKENPHP_MAX_THREADS "$FRANKENPHP_MAX_THREADS" "$minimum_threads"
         ;;
 esac
 
@@ -74,10 +76,18 @@ case "$role" in
         export QUEUE_MEMORY_LIMIT="${QUEUE_MEMORY_LIMIT:-128M}"
         export QUEUE_MAX_JOBS="${QUEUE_MAX_JOBS:-500}"
         export QUEUE_MAX_TIME="${QUEUE_MAX_TIME:-3600}"
+        export REALTIME_QUEUE_SLEEP="${REALTIME_QUEUE_SLEEP:-0.25}"
         validate_integer QUEUE_SLEEP "$QUEUE_SLEEP" 1
         validate_integer QUEUE_MEMORY "$QUEUE_MEMORY" 1
         validate_integer QUEUE_MAX_JOBS "$QUEUE_MAX_JOBS" 0
         validate_integer QUEUE_MAX_TIME "$QUEUE_MAX_TIME" 0
+        case "$REALTIME_QUEUE_SLEEP" in
+            0.1|0.25|0.5|1) ;;
+            *)
+                echo "REALTIME_QUEUE_SLEEP must be 0.1, 0.25, 0.5, or 1 seconds." >&2
+                exit 1
+                ;;
+        esac
         ;;
 esac
 

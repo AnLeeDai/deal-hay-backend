@@ -44,11 +44,11 @@ class AppServiceProvider extends ServiceProvider
     private function configureDiagnosticsQueryTiming(): void
     {
         Event::listen(QueryExecuted::class, function (QueryExecuted $event): void {
-            if (! $this->app->bound('request')) {
+            if (! app()->bound('request')) {
                 return;
             }
 
-            $request = $this->app['request'];
+            $request = app('request');
             $metrics = $request->attributes->get('diagnostics.sql');
             if (! is_array($metrics)) {
                 return;

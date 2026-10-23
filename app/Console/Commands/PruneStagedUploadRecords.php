@@ -33,39 +33,44 @@ class PruneStagedUploadRecords extends Command
 
         $threshold = now()->subHour();
         $uploads = StagedImageUpload::query()
+            ->select(['id', 'consumed_at', 'destination_path'])
             ->where('expires_at', '<', $threshold)
             ->where(function (Builder $query) use ($threshold): void {
                 $query->whereNull('claimed_at')->orWhere('claimed_at', '<', $threshold);
             })
-            ->oldest('expires_at')
             ->limit($limit)
-            ->get(['id', 'consumed_at', 'destination_path']);
+            ->lazyById(200);
 
+        $matched = 0;
         $deleted = 0;
         $failed = 0;
-        if (! $this->option('dry-run')) {
-            foreach ($uploads as $upload) {
-                try {
-                    if ($upload->consumed_at === null
-                        && filled($upload->destination_path)
-                        && ! $this->images->delete($upload->destination_path)) {
-                        $failed++;
+        foreach ($uploads as $upload) {
+            $matched++;
 
-                        continue;
-                    }
+            if ($this->option('dry-run')) {
+                continue;
+            }
 
-                    $upload->delete();
-                    $deleted++;
-                } catch (Throwable $exception) {
-                    report($exception);
+            try {
+                if ($upload->consumed_at === null
+                    && filled($upload->destination_path)
+                    && ! $this->images->delete($upload->destination_path)) {
                     $failed++;
+
+                    continue;
                 }
+
+                $upload->delete();
+                $deleted++;
+            } catch (Throwable $exception) {
+                report($exception);
+                $failed++;
             }
         }
 
         $this->components->info(sprintf(
             'Expired staged upload records matched %d, deleted %d, failed %d.',
-            $uploads->count(),
+            $matched,
             $deleted,
             $failed,
         ));

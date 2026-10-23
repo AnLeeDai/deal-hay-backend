@@ -14,6 +14,12 @@ services:
       - fromGroup: deal-hay-production
       - key: DEPLOY_ROLE
         value: web
+      - key: OCTANE_WORKERS
+        value: "1"
+      - key: FRANKENPHP_NUM_THREADS
+        value: "1"
+      - key: FRANKENPHP_MAX_THREADS
+        value: "2"
       # This Blueprint runs one API instance. Use a shared store if scaling.
       - key: SPEEDTEST_CACHE_STORE
         value: file

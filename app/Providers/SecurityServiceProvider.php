@@ -13,15 +13,15 @@ use Illuminate\Support\ServiceProvider;
 
 class SecurityServiceProvider extends ServiceProvider
 {
-    public function boot(UserSessionService $sessions): void
+    public function boot(): void
     {
-        Event::listen(Login::class, function (Login $event) use ($sessions): void {
+        Event::listen(Login::class, function (Login $event): void {
             $request = request();
 
             if ($request instanceof Request && $request->hasSession() && $event->user instanceof User) {
                 $request->session()->put(
                     UserSessionService::VERSION_KEY,
-                    $sessions->markCurrent($event->user, $request->session()->getId()),
+                    app(UserSessionService::class)->markCurrent($event->user, $request->session()->getId()),
                 );
             }
         });

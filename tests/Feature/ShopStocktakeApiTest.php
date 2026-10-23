@@ -4,12 +4,23 @@ use App\Actions\SyncShopProductInventory;
 use App\Models\ShopInventoryMovement;
 use App\Models\ShopProduct;
 use App\Models\ShopProductVariant;
+use App\Models\ShopStocktake;
 use App\Models\User;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 
 function stocktakeToken(User $shop): string
 {
     return $shop->createToken('stocktake-test')->plainTextToken;
+}
+
+// Preserve coverage of sessions created before per-unit tracking was introduced.
+function legacyStocktakeResponse(): TestResponse
+{
+    $response = test()->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm']);
+    ShopStocktake::query()->whereKey($response->json('data.id'))->update(['counting_mode' => 'legacy']);
+
+    return $response;
 }
 
 it('snapshots hidden products and non retired variants without counting variant parents twice', function (): void {
@@ -31,7 +42,7 @@ it('counts product QR and SKU scans and reports shortage surplus and unknown sto
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['stock' => 2, 'sku' => 'TEST-SKU']);
     $this->withToken(stocktakeToken($shop));
-    $id = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data.id');
+    $id = legacyStocktakeResponse()->json('data.id');
     $path = "/api/private/shop/stocktakes/{$id}/scan";
     $this->postJson($path, ['code' => "DH:P:{$product->id}", 'quantity' => 1, 'scan_id' => (string) Str::uuid()])
         ->assertOk()->assertJsonPath('data.items.0.result', 'shortage');
@@ -46,7 +57,7 @@ it('deduplicates retried scans but counts independent scans of the same QR', fun
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['stock' => 2]);
     $this->withToken(stocktakeToken($shop));
-    $id = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data.id');
+    $id = legacyStocktakeResponse()->json('data.id');
     $path = "/api/private/shop/stocktakes/{$id}/scan";
     $payload = ['code' => "DH:P:{$product->id}", 'quantity' => 1, 'scan_id' => (string) Str::uuid()];
     $this->postJson($path, $payload)->assertOk();
@@ -59,7 +70,7 @@ it('allows correcting counts to zero and refuses edits after completing a report
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['stock' => 3]);
     $this->withToken(stocktakeToken($shop));
-    $data = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data');
+    $data = legacyStocktakeResponse()->json('data');
     $path = "/api/private/shop/stocktakes/{$data['id']}";
     $item = $data['items'][0]['id'];
     $this->patchJson("{$path}/items/{$item}", ['counted_quantity' => 4])->assertOk();
@@ -74,7 +85,7 @@ it('reconciles counted inventory and writes an auditable movement without adding
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['stock' => 3]);
     $this->withToken(stocktakeToken($shop));
-    $data = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data');
+    $data = legacyStocktakeResponse()->json('data');
     $path = "/api/private/shop/stocktakes/{$data['id']}";
     $this->patchJson("{$path}/items/{$data['items'][0]['id']}", ['counted_quantity' => 1])->assertOk();
     $this->postJson("{$path}/scan", ['code' => 'UNKNOWN', 'scan_id' => (string) Str::uuid()])->assertOk();
@@ -89,7 +100,7 @@ it('rejects stale inventory instead of overwriting stock changed by an order', f
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['stock' => 3]);
     $this->withToken(stocktakeToken($shop));
-    $data = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data');
+    $data = legacyStocktakeResponse()->json('data');
     $product->update(['stock' => 2]);
     $path = "/api/private/shop/stocktakes/{$data['id']}";
     $this->postJson("{$path}/complete", ['adjust_stock' => true])->assertUnprocessable()->assertJsonValidationErrors('adjust_stock');
@@ -103,7 +114,7 @@ it('reconciles variant stock separately and refreshes the product total', functi
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->hasVariants()->create(['stock' => 5]);
     $variant = ShopProductVariant::factory()->for($product, 'product')->create(['stock' => 5]);
     $this->withToken(stocktakeToken($shop));
-    $data = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data');
+    $data = legacyStocktakeResponse()->json('data');
     $path = "/api/private/shop/stocktakes/{$data['id']}";
     $this->postJson("{$path}/scan", ['code' => "DH:V:{$variant->id}", 'quantity' => 7, 'scan_id' => (string) Str::uuid()])->assertOk();
     $this->postJson("{$path}/complete", ['adjust_stock' => true])->assertOk();
@@ -114,7 +125,7 @@ it('detects intervening sale and return even when the final stock equals the sna
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['stock' => 3]);
     $this->withToken(stocktakeToken($shop));
-    $data = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data');
+    $data = legacyStocktakeResponse()->json('data');
     $inventory = app(SyncShopProductInventory::class);
     $inventory->adjust($product, null, -1, 'order_reserved', $shop);
     $inventory->adjust($product, null, 1, 'order_cancelled', $shop);
@@ -141,7 +152,7 @@ it('rejects deleted inventory and invalid scan quantities', function (): void {
     $shop = User::factory()->shopOwner()->create();
     $product = ShopProduct::factory()->for($shop, 'shopOwner')->create(['stock' => 3]);
     $this->withToken(stocktakeToken($shop));
-    $data = $this->postJson('/api/private/shop/stocktakes', ['name' => 'Đếm'])->json('data');
+    $data = legacyStocktakeResponse()->json('data');
     $path = "/api/private/shop/stocktakes/{$data['id']}";
     $this->postJson("{$path}/scan", ['code' => "DH:P:{$product->id}", 'quantity' => -1, 'scan_id' => (string) Str::uuid()])->assertUnprocessable();
     $product->delete();

@@ -9,6 +9,7 @@ use App\Models\ShopProductOptionValue;
 use App\Models\ShopProductVariant;
 use App\Models\User;
 use App\Services\MediaClient;
+use App\Services\ShopInventoryUnitService;
 use Carbon\CarbonInterface;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
@@ -24,6 +25,7 @@ class SaveShopProductDetails
         private readonly SyncShopProductInventory $inventory,
         private readonly MediaClient $stagedUploads,
         private readonly MediaClient $cleanup,
+        private readonly ShopInventoryUnitService $units,
     ) {}
 
     /**
@@ -176,6 +178,7 @@ class SaveShopProductDetails
                         'stock' => (int) $lockedProduct->variants()->where('is_active', true)->sum('stock'),
                         'has_variants' => true,
                     ]);
+                    $this->units->retireForProduct($lockedProduct);
                 }
 
                 $this->removeGalleryImages($lockedProduct, $removeImageIds, $obsoletePaths);
@@ -396,11 +399,16 @@ class SaveShopProductDetails
                     'is_default' => false,
                     'retired_at' => now(),
                 ]);
+                $this->units->retireForProduct($product, $variant);
 
                 continue;
             }
 
-            $variant->delete();
+            if ($variant->inventoryUnits()->exists()) {
+                $variant->update(['combination_key' => null, 'is_active' => false, 'is_default' => false, 'retired_at' => now()]);
+            } else {
+                $variant->delete();
+            }
         }
     }
 

@@ -27,6 +27,19 @@ All successful JSON responses use UTF-8 JSON. Validation failures return `422 { 
 | GET | `/auth/me` | Bearer | none | `{ data: user, meta: { unread_messages_count, unread_notifications_count } }` |
 | POST | `/auth/logout` | Bearer | none | `{ message }` |
 
+## Network speedtest
+
+| Method | Path | Auth | Request | Response |
+|---|---|---|---|---|
+| POST | `/diagnostics/speedtest/session` | Active signed-in user; 3 starts/minute | none | `{ token, expires_at, endpoint_path: "/diagnostics/speedtest", limits: { max_download_bytes, max_upload_bytes, max_session_bytes, max_requests } }` |
+| GET | `/diagnostics/speedtest/ping` | Dedicated speedtest Bearer token | none | `204`, no body, `Cache-Control: no-store` |
+| GET | `/diagnostics/speedtest/download` | Dedicated speedtest Bearer token | Preferred `X-Speedtest-Bytes` request header; fallback `bytes?` query, integer 1–4194304, default 1048576 | Exact-length random `application/octet-stream`, `Content-Encoding: identity`, `X-Speedtest-Bytes`, `Vary: X-Speedtest-Bytes` |
+| POST | `/diagnostics/speedtest/upload` | Dedicated speedtest Bearer token | Raw `application/octet-stream`, maximum 2097152 bytes | `{ received_bytes }`, matching `X-Speedtest-Bytes`; payload is discarded |
+
+Grants expire after 120 seconds and permit at most 64 requests and 64 MiB reserved transfer bytes. Each upload reserves its maximum 2 MiB before reading, including missing or false Content-Length. Grants are independent of account tokens and only accepted on the three probe routes. Missing, invalid and expired grants return 401; size errors use 413/422, unsupported upload MIME 415, inconsistent Content-Length 400, exhausted byte/request budgets 429. Probe limiters additionally allow 120 requests/minute/token and 240/minute/IP. Metadata follows the configured cache limiter store (or default cache); grant counters update atomically without extending expiration. Payloads are not saved to DB/R2. The probes do not execute dependency diagnostics or accept remote target URLs.
+
+The browser combines the trusted API base URL with `endpoint_path`, then probes that host directly with credentials omitted. Probe URLs stay fixed across samples, and adaptive downloads send `X-Speedtest-Bytes` so changing sample size can reuse the warmed CORS preflight. This header takes precedence over the query even when invalid. Configured CORS origins may send Authorization, Content-Type and X-Speedtest-Bytes and read X-Speedtest-Bytes, Content-Encoding and Retry-After; Timing-Allow-Origin is sent for configured frontend origins. HTTP ping measures the complete browser/API request round trip, including application work, separately from the server-side health probes below.
+
 ## Tickets, notifications, presence
 
 `GET /diagnostics` requires an active signed-in user and allows six requests per minute per account. It returns `{ checked_at, duration_ms, checks: { database, cache, storage, reverb } }`. Each check has `{ status: "ok" | "failed" | "skipped", latency_ms: number | null, message }`. Dependency failures remain HTTP 200 with a failed check; authentication and rate limiting use 401/403/429. Samples are cached for 15 seconds on the API host while responses use `Cache-Control: no-store`. Times measure application operations, including SQL or handshakes, and are not pure network ping. Only configured servers are probed; credentials, hostnames and internal errors are omitted.
@@ -93,11 +106,17 @@ Successful responses also include fresh `request: { duration_ms, database_querie
 | DELETE | `/private/shop/coupons/{couponId}` | Bearer shop owner | none | `{ message }` |
 | GET | `/shops/{shopCode}/coupons` | Public | `product_id?` | `{ coupons }`; only available offers assigned to active products |
 | GET | `/private/shop/stocktakes` | Bearer shop owner | none | `{ data: StocktakeSummary[] }`, latest 30 owned sessions |
-| POST | `/private/shop/stocktakes` | Bearer shop owner | `name` (max 120) | `201 { data: Stocktake }`, stock and movement snapshot for each product / non-retired variant |
-| GET | `/private/shop/stocktakes/{id}` | Bearer shop owner | none | `{ data: Stocktake }` including items and expected/counted/shortage/surplus/unknown totals |
-| POST | `/private/shop/stocktakes/{id}/scan` | Bearer shop owner | `code` (QR `DH:P:{uuid}` / `DH:V:{uuid}`, or SKU), `quantity?` (default 1), `scan_id` (UUID) | `{ data: Stocktake }`; retries with same scan ID are deduplicated; unknown codes counted separately |
-| PATCH | `/private/shop/stocktakes/{id}/items/{itemId}` | Bearer shop owner | `counted_quantity` (0–999999) | `{ data: Stocktake }`; absolute count correction |
-| POST | `/private/shop/stocktakes/{id}/complete` | Bearer shop owner | `adjust_stock` (boolean) | `{ message, data: Stocktake }`; false saves report; true reconciles with auditable movements only if stock and movement history remain unchanged; finalized sessions are immutable |
+| GET | `/private/shop/inventory-units` | Bearer shop owner | `page?`, `per_page?` (1–200, default100), `search?`, `product_id?` | `{ data: InventoryUnit[], meta: { current_page, last_page, total, per_page } }`; available units with stable UUID/SKU; `code` equals the unit SKU and is the complete QR payload; legacy stock is backfilled without duplicating units |
+| POST | `/private/shop/stocktakes` | Bearer shop owner | `name` (max120) | `201 { data: Stocktake }`, `counting_mode: serialized`; snapshot of each expected physical unit and aggregate stock/movement baseline |
+| GET | `/private/shop/stocktakes/{id}` | Bearer shop owner | none | `{ data: Stocktake }` with quantity/financial summaries, current sale prices, confirmation token; each item includes first100 `units` plus `units_total` |
+| GET | `/private/shop/stocktakes/{id}/items/{itemId}/units` | Bearer shop owner | `page?`, `per_page?` (1–100) | `{ data: StocktakeUnit[], meta }`; owner/session/item scoped; sorted by unit SKU |
+| POST | `/private/shop/stocktakes/{id}/scan` | Bearer shop owner | `code` (unique unit SKU; older `DH:U:{uuid}` tags remain accepted), `quantity?` (must1), `scan_id` (UUID) | `{ data: Stocktake }`; case-insensitive lookup and scanner CR/LF/Tab boundary trimming; embedded controls rejected; physical-unit dedup across SKU/legacy aliases/independent scans and request retries; aggregate catalog codes rejected in serialized mode; unknown codes excluded from monetary valuation |
+| PATCH | `/private/shop/stocktakes/{id}/units/{unitId}` | Bearer shop owner | `counted: false` | `{ data: Stocktake }`; undo count for one unit; rescan to count again |
+| PATCH | `/private/shop/stocktakes/{id}/items/{itemId}` | Bearer shop owner | `counted_quantity` (0–999999) | Legacy sessions only; serialized sessions reject aggregate count edits |
+| POST | `/private/shop/stocktakes/{id}/save` | Bearer shop owner | none | `{ message, data: Stocktake }`; checkpoint `saved_at` and unit prices, remains editable |
+| POST | `/private/shop/stocktakes/{id}/complete` | Bearer shop owner | `adjust_stock` boolean, `confirmed: true`, `confirmation_token` from latest serialized report | `{ message, data: Stocktake }`; freezes current sale prices, financial summary and confirmer/time. False confirms report while retaining stock; true removes/restores exact unit IDs if stock/movements/available IDs are unchanged. Stale count/price token rejected; exact same request may be replayed safely |
+
+Serialized money fields are `expected_value`, `counted_value`, `shortage_value`, `surplus_value`, `net_difference_value` (surplus minus shortage), and `debt_amount` (gross shortage value, no automatic surplus offset). They appear in `financial_summary` and quantity `summary`. Each known item has `unit_price` and `values`; unknown items have null monetary fields. Unit prices use variant sale price when present, including zero, otherwise product sale price. Missing and unexpected unit identities remain separate even when quantities balance. Completed data is immutable. Historical sessions retain `counting_mode: legacy` and no invented financial summary.
 | POST | `/private/shop/orders` | Bearer shop owner | Order payload from source request including idempotency fields and items | `201/200 { message, replayed }` + `Idempotency-Replayed` |
 | PATCH | `/private/shop/orders/{orderId}/status` | Bearer shop owner | `status` | `{ message, data }` |
 | PATCH | `/private/shop/categories/reorder` | Bearer shop owner | `category_ids[]` | `{ message }` |

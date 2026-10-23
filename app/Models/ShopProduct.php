@@ -25,6 +25,13 @@ class ShopProduct extends Model
 
     protected static function booted(): void
     {
+        static::deleting(function (self $product): void {
+            $product->inventoryUnits()->where('status', 'available')->update([
+                'status' => 'removed', 'removed_at' => now(),
+                'removed_reference_type' => null, 'removed_reference_id' => null,
+            ]);
+        });
+
         static::saving(function (self $product): void {
             $product->sku = filled($product->sku)
                 ? Str::upper(trim((string) $product->sku))
@@ -100,6 +107,11 @@ class ShopProduct extends Model
     public function images(): HasMany
     {
         return $this->hasMany(ShopProductImage::class)->orderBy('display_order');
+    }
+
+    public function inventoryUnits(): HasMany
+    {
+        return $this->hasMany(ShopInventoryUnit::class, 'shop_product_id');
     }
 
     public function variants(): HasMany

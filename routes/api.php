@@ -24,12 +24,14 @@ use App\Http\Controllers\ShopController;
 use App\Http\Controllers\ShopCouponController;
 use App\Http\Controllers\ShopFollowController;
 use App\Http\Controllers\ShopInventoryController;
+use App\Http\Controllers\ShopInventoryUnitController;
 use App\Http\Controllers\ShopOrderController;
 use App\Http\Controllers\ShopProductPricingController;
 use App\Http\Controllers\ShopProductReviewController;
 use App\Http\Controllers\ShopReactionController;
 use App\Http\Controllers\ShopShippingSettingController;
 use App\Http\Controllers\ShopStocktakeController;
+use App\Http\Controllers\SpeedtestController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -38,6 +40,11 @@ Route::get('/media/assets/{path}', [MediaGatewayController::class, 'asset'])
     ->where('path', '.*')
     ->name('media.asset');
 Route::post('/media/browser/transform', [MediaGatewayController::class, 'browserTransform'])->name('media.browser.transform');
+Route::prefix('diagnostics/speedtest')->middleware('throttle:speedtest-probe')->group(function (): void {
+    Route::get('/ping', [SpeedtestController::class, 'ping'])->name('speedtest.ping');
+    Route::get('/download', [SpeedtestController::class, 'download'])->name('speedtest.download');
+    Route::post('/upload', [SpeedtestController::class, 'upload'])->name('speedtest.upload');
+});
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::get('/shops/{shop:user_code}', [PublicShopController::class, 'show'])->name('shops.show');
 Route::get('/shops/{shop:user_code}/coupons', [PublicShopCouponController::class, 'index'])->name('shops.coupons.index');
@@ -66,6 +73,8 @@ Route::prefix('addresses')->name('addresses.')->group(function (): void {
 });
 
 Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
+    Route::post('/diagnostics/speedtest/session', [SpeedtestController::class, 'session'])
+        ->middleware('throttle:speedtest-session')->name('speedtest.session');
     Route::get('/diagnostics', ServerDiagnosticsController::class)
         ->middleware('throttle:diagnostics')->name('diagnostics');
     Route::get('/shops/{shop:user_code}/products/{shopProduct:slug}/shipping-offer/code', [ShippingOfferController::class, 'code'])
@@ -167,11 +176,15 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
         Route::delete('/shop/products/{shopProduct}', [ShopController::class, 'destroyProduct'])->name('shop.products.destroy');
         Route::patch('/shop/products/{shopProduct}/inventory', [ShopInventoryController::class, 'adjust'])->name('shop.products.inventory.adjust');
         Route::get('/shop/stocktakes', [ShopStocktakeController::class, 'index'])->name('shop.stocktakes.index');
+        Route::get('/shop/inventory-units', [ShopInventoryUnitController::class, 'index'])->name('shop.inventory-units.index');
         Route::post('/shop/stocktakes', [ShopStocktakeController::class, 'store'])->middleware('throttle:10,1')->name('shop.stocktakes.store');
         Route::get('/shop/stocktakes/{stocktake}', [ShopStocktakeController::class, 'show'])->name('shop.stocktakes.show');
         Route::post('/shop/stocktakes/{stocktake}/scan', [ShopStocktakeController::class, 'scan'])->middleware('throttle:240,1')->name('shop.stocktakes.scan');
         Route::patch('/shop/stocktakes/{stocktake}/items/{item}', [ShopStocktakeController::class, 'updateItem'])->name('shop.stocktakes.items.update');
         Route::post('/shop/stocktakes/{stocktake}/complete', [ShopStocktakeController::class, 'complete'])->name('shop.stocktakes.complete');
+        Route::post('/shop/stocktakes/{stocktake}/save', [ShopStocktakeController::class, 'save'])->name('shop.stocktakes.save');
+        Route::patch('/shop/stocktakes/{stocktake}/units/{unit}', [ShopStocktakeController::class, 'undoUnit'])->name('shop.stocktakes.units.undo');
+        Route::get('/shop/stocktakes/{stocktake}/items/{item}/units', [ShopStocktakeController::class, 'itemUnits'])->name('shop.stocktakes.items.units');
         Route::post('/shop/coupons', [ShopCouponController::class, 'store'])->name('shop.coupons.store');
         Route::patch('/shop/coupons/{shopCoupon}', [ShopCouponController::class, 'update'])->name('shop.coupons.update');
         Route::delete('/shop/coupons/{shopCoupon}', [ShopCouponController::class, 'destroy'])->name('shop.coupons.destroy');

@@ -14,21 +14,21 @@ use Illuminate\Validation\ValidationException;
 
 class ShopStocktakeService
 {
-    public function __construct(private readonly SyncShopProductInventory $inventory) {}
+    public function __construct(private readonly SyncShopProductInventory $inventory, private readonly SerializedStocktakeService $serialized) {}
 
     public function create(User $owner, string $name): ShopStocktake
     {
         return DB::transaction(function () use ($owner, $name): ShopStocktake {
-            $stocktake = ShopStocktake::query()->create(['shop_owner_id' => $owner->getKey(), 'name' => trim($name)]);
+            $stocktake = ShopStocktake::query()->create(['shop_owner_id' => $owner->getKey(), 'name' => trim($name), 'counting_mode' => 'serialized']);
             $products = ShopProduct::query()->where('shop_owner_id', $owner->getKey())->orderBy('id')->lockForUpdate()->get();
 
             foreach ($products as $product) {
                 if ($product->has_variants) {
                     foreach ($product->allVariants()->whereNull('retired_at')->orderBy('id')->lockForUpdate()->get() as $variant) {
-                        $this->snapshot($stocktake, $product, $variant);
+                        $this->serialized->snapshot($stocktake, $product, $variant);
                     }
                 } else {
-                    $this->snapshot($stocktake, $product);
+                    $this->serialized->snapshot($stocktake, $product, null);
                 }
             }
 
@@ -38,6 +38,11 @@ class ShopStocktakeService
 
     public function scan(ShopStocktake $stocktake, string $code, int $quantity, string $scanId): void
     {
+        if ($stocktake->counting_mode === 'serialized') {
+            $this->serialized->scan($stocktake, $code, $quantity, $scanId);
+
+            return;
+        }
         $code = trim($code);
         if ($code === '') {
             throw ValidationException::withMessages(['code' => 'Vui lòng quét hoặc nhập mã sản phẩm.']);
@@ -81,13 +86,21 @@ class ShopStocktakeService
 
     public function updateItem(ShopStocktake $stocktake, string $itemId, int $count): void
     {
+        if ($stocktake->counting_mode === 'serialized') {
+            throw ValidationException::withMessages(['counted_quantity' => 'Phiên kiểm kê theo mã riêng chỉ ghi nhận từng tem; không nhập số lượng gộp.']);
+        }
         DB::transaction(function () use ($stocktake, $itemId, $count): void {
             $this->counting($stocktake)->items()->findOrFail($itemId)->update(['counted_quantity' => $count]);
         }, attempts: 5);
     }
 
-    public function complete(ShopStocktake $stocktake, User $owner, bool $adjustStock): void
+    public function complete(ShopStocktake $stocktake, User $owner, bool $adjustStock, ?string $token = null): void
     {
+        if ($stocktake->counting_mode === 'serialized') {
+            $this->serialized->complete($stocktake, $owner, $adjustStock, $token ?? '');
+
+            return;
+        }
         DB::transaction(function () use ($stocktake, $owner, $adjustStock): void {
             $locked = $this->counting($stocktake);
             if ($adjustStock) {
@@ -115,12 +128,19 @@ class ShopStocktakeService
 
     public function payload(ShopStocktake $stocktake): array
     {
+        if ($stocktake->counting_mode === 'serialized') {
+            return $this->serialized->report($stocktake);
+        }
         $items = $stocktake->items()->orderBy('is_unknown')->orderBy('product_name')->orderBy('variant_name')->get();
 
         return [
             'id' => $stocktake->getKey(),
             'name' => $stocktake->name,
             'status' => $stocktake->status,
+            'counting_mode' => 'legacy',
+            'saved_at' => $stocktake->saved_at?->toIso8601String(),
+            'financial_summary' => null,
+            'confirmation_token' => null,
             'stock_adjusted' => $stocktake->stock_adjusted,
             'created_at' => $stocktake->created_at?->toIso8601String(),
             'completed_at' => $stocktake->completed_at?->toIso8601String(),
@@ -150,17 +170,6 @@ class ShopStocktakeService
         }
 
         return $locked;
-    }
-
-    private function snapshot(ShopStocktake $stocktake, ShopProduct $product, ?ShopProductVariant $variant = null): void
-    {
-        $stocktake->items()->create([
-            'shop_product_id' => $product->getKey(), 'shop_product_variant_id' => $variant?->getKey(),
-            'code' => $variant ? "DH:V:{$variant->getKey()}" : "DH:P:{$product->getKey()}",
-            'product_name' => $product->name, 'variant_name' => $variant?->displayName(),
-            'sku' => $variant?->sku ?? $product->sku, 'expected_quantity' => ($variant ?? $product)->stock,
-            'expected_movement_count' => $this->movementCount($product, $variant),
-        ]);
     }
 
     private function movementCount(ShopProduct $product, ?ShopProductVariant $variant): int

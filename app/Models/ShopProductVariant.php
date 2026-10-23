@@ -27,6 +27,13 @@ class ShopProductVariant extends Model
 
     protected static function booted(): void
     {
+        static::deleting(function (self $variant): void {
+            $variant->inventoryUnits()->where('status', 'available')->update([
+                'status' => 'removed', 'removed_at' => now(),
+                'removed_reference_type' => null, 'removed_reference_id' => null,
+            ]);
+        });
+
         static::saving(function (self $variant): void {
             $variant->sku = Str::upper(trim((string) $variant->sku));
             $variant->sku_normalized = $variant->sku;
@@ -119,6 +126,11 @@ class ShopProductVariant extends Model
     public function inventoryMovements(): HasMany
     {
         return $this->hasMany(ShopInventoryMovement::class);
+    }
+
+    public function inventoryUnits(): HasMany
+    {
+        return $this->hasMany(ShopInventoryUnit::class, 'shop_product_variant_id');
     }
 
     public function orderItems(): HasMany
